@@ -15,13 +15,13 @@ export async function generateMetadata(): Promise<Metadata> {
     description,
     manifest: "/manifest.webmanifest",
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg", apple: "/favicon.svg" },
-    openGraph: { title, description, type: "website", images: [{ url: `${origin}/og.png`, width: 1672, height: 941, alt: "AnoSked student calendar preview" }] },
-    twitter: { card: "summary_large_image", title, description, images: [`${origin}/og.png`] },
+    openGraph: { title, description, type: "website" },
+    twitter: { card: "summary", title, description },
   };
 }
 
 export const viewport: Viewport = {
-  themeColor: "#F5F5F7",
+  themeColor: "#CFE5EF",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",

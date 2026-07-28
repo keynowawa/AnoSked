@@ -67,7 +67,7 @@ type ParseResult = {
 type View = "today" | "calendar" | "tasks" | "subjects" | "settings";
 
 const STORAGE_KEY = "anosked.local.v1";
-const COLORS = ["#625AF6", "#F06F5E", "#1F9D78", "#D08B22", "#4B87E5", "#A64CC7"];
+const COLORS = ["#7AA9BC", "#C88E64", "#6E927D", "#B59B6A", "#89999D", "#B98278"];
 const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number }> = [
   { code: "MO", short: "M", label: "Monday", js: 1 },
   { code: "TU", short: "T", label: "Tuesday", js: 2 },
@@ -471,33 +471,30 @@ export default function Home() {
     const available = width - margin * 2;
     const days = DAY_META.slice(0, 6);
 
-    ctx.fillStyle = "#F4F2FF";
+    ctx.fillStyle = "#F6F2EA";
     ctx.fillRect(0, 0, width, height);
-    const gradient = ctx.createLinearGradient(0, 0, width, height);
-    gradient.addColorStop(0, "rgba(98,90,246,.18)");
-    gradient.addColorStop(1, "rgba(240,111,94,.10)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = "#181725";
+    ctx.fillStyle = "#DDEEF5";
+    ctx.fillRect(0, 0, width, mode === "wallpaper" ? 560 : 120);
+    ctx.fillStyle = "#4A3026";
     ctx.font = `700 ${mode === "wallpaper" ? 66 : 72}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.fillText(data.profile.nickname ? `${data.profile.nickname}’s sked` : "My weekly sked", margin, top - 95);
-    ctx.fillStyle = "#686677";
+    ctx.fillStyle = "#6F797B";
     ctx.font = `500 ${mode === "wallpaper" ? 30 : 34}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.fillText(`${data.semester}${data.block ? `  ·  ${data.block}` : ""}`, margin, top - 38);
 
     const dayHeight = mode === "wallpaper" ? 285 : 230;
     days.forEach((day, dayIndex) => {
       const y = top + dayIndex * dayHeight;
-      ctx.fillStyle = "rgba(255,255,255,.82)";
+      ctx.fillStyle = "#FFFDF9";
       ctx.beginPath();
       ctx.roundRect(margin, y, available, dayHeight - 22, 34);
       ctx.fill();
-      ctx.fillStyle = "#8A8799";
+      ctx.fillStyle = "#6F797B";
       ctx.font = "700 25px -apple-system, BlinkMacSystemFont, sans-serif";
       ctx.fillText(day.label.toUpperCase(), margin + 34, y + 48);
       const entries = data.subjects.filter((subject) => subject.meeting.days.includes(day.code)).sort((a, b) => a.meeting.start.localeCompare(b.meeting.start));
       if (!entries.length) {
-        ctx.fillStyle = "#9C99A8";
+        ctx.fillStyle = "#89999D";
         ctx.font = "500 30px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.fillText("No classes", margin + 34, y + 112);
       }
@@ -505,20 +502,20 @@ export default function Home() {
         const itemY = y + 86 + itemIndex * 76;
         ctx.fillStyle = subject.color;
         ctx.beginPath();
-        ctx.roundRect(margin + 34, itemY, 12, 52, 6);
+        ctx.arc(margin + 45, itemY + 25, 9, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = "#1D1B29";
+        ctx.fillStyle = "#4A3026";
         ctx.font = "700 31px -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText(subject.code, margin + 66, itemY + 30);
-        ctx.fillStyle = "#666374";
+        ctx.fillText(subject.code, margin + 72, itemY + 30);
+        ctx.fillStyle = "#6F797B";
         ctx.font = "500 27px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.fillText(`${formatTime(subject.meeting.start)}–${formatTime(subject.meeting.end)}  ·  ${subject.meeting.room}`, margin + 255, itemY + 30);
       });
     });
-    ctx.fillStyle = "#625AF6";
+    ctx.fillStyle = "#4A3026";
     ctx.font = "700 28px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillText("AnoSked", margin, height - 62);
-    ctx.fillStyle = "#777487";
+    ctx.fillStyle = "#6F797B";
     ctx.font = "500 24px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillText("Your schedule stays yours.", margin + 145, height - 62);
     canvas.toBlob((blob) => {
@@ -548,8 +545,8 @@ export default function Home() {
             </div>
             <div className="mini-schedule" aria-label="Sample AnoSked calendar">
               <div className="mini-date"><strong>Wednesday</strong><span>2 classes</span></div>
-              <div className="mini-event active"><i style={{ background: "#625AF6" }} /><div><strong>CS420</strong><span>6:00–9:00 PM · SV217</span></div><b>Now</b></div>
-              <div className="mini-event"><i style={{ background: "#1F9D78" }} /><div><strong>CS467</strong><span>7:30–9:00 PM · SV213</span></div></div>
+              <div className="mini-event active"><i style={{ background: "#7AA9BC" }} /><div><strong>CS420</strong><span>6:00–9:00 PM · SV217</span></div><b>Now</b></div>
+              <div className="mini-event"><i style={{ background: "#6E927D" }} /><div><strong>CS467</strong><span>7:30–9:00 PM · SV213</span></div></div>
             </div>
           </div>
 
@@ -648,7 +645,7 @@ export default function Home() {
             <div className="today-layout">
               <div className="timeline-card">
                 <div className="section-heading"><h2>Timeline</h2><span>{DAY_META.find((day) => day.code === dayCode)?.label}</span></div>
-                {!daySubjects.length ? <EmptyState title="A clear day" detail="No enrolled subjects meet today. Swipe to another day to check your week." /> : daySubjects.map((subject) => {
+                {!daySubjects.length ? <EmptyState title="Walang klase today" detail="Take it easy. Swipe to another day when you want to check the rest of your week." /> : daySubjects.map((subject) => {
                   const now = new Date();
                   const isToday = dateKey(now) === dateKey(selectedDate);
                   const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -679,7 +676,7 @@ export default function Home() {
             <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
             <div className="week-card">
               <div className="week-header"><div><span>{DAY_META.find((day) => day.code === dayCode)?.label}</span><strong>{selectedDate.toLocaleDateString("en-PH", { month: "short", day: "numeric" })}</strong></div><button onClick={exportICS}>Export .ics calendar</button></div>
-              <div className="week-list">{daySubjects.length ? daySubjects.map((subject) => <div className="week-event" key={subject.id}><div className="week-time"><strong>{formatTime(subject.meeting.start)}</strong><span>{formatTime(subject.meeting.end)}</span></div><div className="week-block" style={{ borderLeftColor: subject.color, background: `${subject.color}10` }}><div><span style={{ color: subject.color }}>{subject.code}</span><h3>{subject.title}</h3></div><p>{subject.meeting.room}</p></div></div>) : <EmptyState title="No classes" detail="This day has no enrolled subjects." />}</div>
+            <div className="week-list">{daySubjects.length ? daySubjects.map((subject) => <div className="week-event" key={subject.id}><div className="week-time"><strong>{formatTime(subject.meeting.start)}</strong><span>{formatTime(subject.meeting.end)}</span></div><div className="week-block" style={{ background: `${subject.color}18` }}><span className="week-dot" style={{ background: subject.color }} /><div><span style={{ color: "#4A3026" }}>{subject.code}</span><h3>{subject.title}</h3></div><p>{subject.meeting.room}</p></div></div>) : <EmptyState title="No classes" detail="This day has no enrolled subjects." />}</div>
             </div>
             <div className="export-explainer"><div><span>Image</span><h3>Shareable weekly card</h3><p>A clean PNG for class chats and Stories.</p><button onClick={() => drawSchedule("share")}>Download image</button></div><div><span>Wallpaper</span><h3>Lock Screen-ready</h3><p>Leaves space for the iPhone clock and controls.</p><button onClick={() => drawSchedule("wallpaper")}>Download wallpaper</button></div><div><span>Calendar</span><h3>Apple or Google</h3><p>Recurring classes with 15-minute reminders.</p><button onClick={exportICS}>Download .ics</button></div></div>
           </div>
