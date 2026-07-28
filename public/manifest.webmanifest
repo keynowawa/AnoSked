@@ -1,0 +1,13 @@
+{
+  "name": "AnoSked",
+  "short_name": "AnoSked",
+  "description": "Your private, local student schedule.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F5F5F7",
+  "theme_color": "#625AF6",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
