@@ -140,31 +140,31 @@ function isValidStoredData(value: unknown): value is SkedData {
     && !Number.isNaN(new Date(task.dueAt).getTime()) && typeof task.done === "boolean");
 }
 
-const SAMPLE = `Welcome to Adamson University
+const SAMPLE = `Welcome to Northbridge University
 Subject Enlistment
 1st Semester 2026-2027
-B.S. COMPUTER SCIENCE
-Fourth Year - 1st Semester
+B.S. INFORMATION TECHNOLOGY
+Second Year - 1st Semester
 Enrolled Subjects
-Block No. : CS 402
+Block No. : IT 201
 Section
 Subject
 Units
-25064
-CS420 : CS RESEARCH PROJECT 2 (9750)
-Wed 18:00-21:00 SV217
+51001
+IT210 : WEB SYSTEMS AND TECHNOLOGIES (12001)
+MTh 09:00-10:30 LAB2
 3
-25069
-CS467 : PE - CODING THEORY AND CRYPTOLOGY (250060)
-MTh 19:30-21:00 SV213
+51002
+IT220 : HUMAN COMPUTER INTERACTION (12002)
+TF 10:30-12:00 RM305
 3
-25072
-CS468 : PE- PARALLEL AND DISTRIBUTED COMPUTING (250065)
-MTh 18:00-19:30 SV213
+51003
+MATH210 : DISCRETE MATHEMATICS (12003)
+Wed 13:00-16:00 RM402
 3
-25066
-CS342 : PROFESSIONAL ETHICS (9742)
-TF 18:00-19:30 SV213
+51004
+HUM120 : ETHICS IN THE DIGITAL WORLD (12004)
+TF 14:00-15:30 RM204
 3
 Total Units : 12`;
 
@@ -288,23 +288,31 @@ function compactTitle(title: string, max = 42) {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
 }
 
-function playFeedbackTone(kind: "save" | "complete" = "save") {
+function playFeedbackTone(kind: "save" | "complete" | "delete" = "save") {
   const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextClass) return;
   const context = new AudioContextClass();
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  oscillator.type = "sine";
-  oscillator.frequency.setValueAtTime(kind === "complete" ? 523 : 440, context.currentTime);
-  if (kind === "complete") oscillator.frequency.exponentialRampToValueAtTime(659, context.currentTime + 0.12);
-  gain.gain.setValueAtTime(0.0001, context.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.07, context.currentTime + 0.015);
-  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.2);
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start();
-  oscillator.stop(context.currentTime + 0.21);
-  oscillator.addEventListener("ended", () => void context.close());
+  const tones = kind === "complete"
+    ? [{ frequency: 523, delay: 0, duration: .14 }, { frequency: 659, delay: .09, duration: .18 }]
+    : kind === "delete"
+      ? [{ frequency: 392, delay: 0, duration: .12 }, { frequency: 330, delay: .08, duration: .16 }]
+      : [{ frequency: 440, delay: 0, duration: .12 }, { frequency: 554, delay: .07, duration: .16 }];
+  tones.forEach((tone, index) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const start = context.currentTime + tone.delay;
+    const end = start + tone.duration;
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(tone.frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.035, start + .018);
+    gain.gain.exponentialRampToValueAtTime(0.0001, end);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(start);
+    oscillator.stop(end);
+    if (index === tones.length - 1) oscillator.addEventListener("ended", () => void context.close());
+  });
 }
 
 function getSelectedDay(date: Date): DayCode {
@@ -333,6 +341,28 @@ function triggerDownload(content: BlobPart, type: string, filename: string) {
   anchor.download = filename;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function shareOrDownload(blob: Blob, filename: string, title: string) {
+  const file = new File([blob], filename, { type: blob.type });
+  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title });
+      return "shared" as const;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return "cancelled" as const;
+    }
+  }
+  triggerDownload(blob, blob.type, filename);
+  return "downloaded" as const;
+}
+
+function canvasBlob(canvas: HTMLCanvasElement) {
+  const dataUrl = canvas.toDataURL("image/png");
+  const binary = atob(dataUrl.split(",")[1]);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: "image/png" });
 }
 
 function subjectIcon(subject: Subject): IconName {
@@ -538,7 +568,7 @@ export default function Home() {
       tasks: [],
       createdAt: new Date().toISOString(),
       consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" },
-      soundEffects: false,
+      soundEffects: true,
       tourCompleted: false,
     };
     setData(next);
@@ -575,10 +605,15 @@ export default function Home() {
     setParsed({ ...parsed, subjects: parsed.subjects.map((subject) => subject.id === id ? { ...subject, icon } : subject) });
   }
 
+  function updateParsedSubjectColor(id: string, color: string) {
+    if (!parsed) return;
+    setParsed({ ...parsed, subjects: parsed.subjects.map((subject) => subject.id === id ? { ...subject, color } : subject) });
+  }
+
   function addSubject(subject: Subject) {
     if (!data) return;
     setData({ ...data, subjects: [...data.subjects, subject], totalUnits: data.totalUnits + subject.units });
-    if (data.soundEffects) playFeedbackTone();
+    if (data.soundEffects !== false) playFeedbackTone();
     setShowSubjectForm(false);
     setNotice(`${subject.title} was added.`);
   }
@@ -594,7 +629,7 @@ export default function Home() {
       const task: Task = { id: uid("task"), subjectId: taskSubject, title: taskTitle.trim(), dueAt: taskDue, done: false };
       setData({ ...data, tasks: [...data.tasks, task] });
     }
-    if (data.soundEffects) playFeedbackTone();
+    if (data.soundEffects !== false) playFeedbackTone();
     setTaskTitle("");
     setTaskSubject("");
     setTaskDue("");
@@ -621,6 +656,7 @@ export default function Home() {
     if (!data || !taskPendingDelete) return;
     setData({ ...data, tasks: data.tasks.filter((task) => task.id !== taskPendingDelete.id) });
     if (editingTaskId === taskPendingDelete.id) cancelTaskEdit();
+    if (data.soundEffects !== false) playFeedbackTone("delete");
     setTaskPendingDelete(null);
     setNotice("Task deleted.");
   }
@@ -641,7 +677,7 @@ export default function Home() {
     if (!data) return;
     const completing = data.tasks.some((task) => task.id === id && !task.done);
     setData({ ...data, tasks: data.tasks.map((task) => task.id === id ? { ...task, done: !task.done } : task) });
-    if (data.soundEffects && completing) playFeedbackTone("complete");
+    if (data.soundEffects !== false && completing) playFeedbackTone("complete");
   }
 
   function exportBackup() {
@@ -674,10 +710,10 @@ export default function Home() {
     event.target.value = "";
   }
 
-  function exportICS() {
+  async function exportICS() {
     if (!data) return;
     const dayCodeMap: Record<DayCode, string> = { MO: "MO", TU: "TU", WE: "WE", TH: "TH", FR: "FR", SA: "SA", SU: "SU" };
-    const until = data.termEnd.replace(/-/g, "") + "T155959Z";
+    const until = data.termEnd.replace(/-/g, "") + "T235959";
     const events = data.subjects.map((subject) => {
       const startBase = new Date(`${data.termStart}T00:00:00`);
       let first: Date | null = null;
@@ -694,8 +730,8 @@ export default function Home() {
         "BEGIN:VEVENT",
         `UID:${subject.id}@anosked.local`,
         `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`,
-        `DTSTART;TZID=Asia/Manila:${compact}T${start}`,
-        `DTEND;TZID=Asia/Manila:${compact}T${end}`,
+        `DTSTART:${compact}T${start}`,
+        `DTEND:${compact}T${end}`,
         `RRULE:FREQ=WEEKLY;BYDAY=${subject.meeting.days.map((day) => dayCodeMap[day]).join(",")};UNTIL=${until}`,
         `SUMMARY:${escapeICS(`${subject.title} · ${subject.code}`)}`,
         `LOCATION:${escapeICS(subject.meeting.room)}`,
@@ -704,8 +740,9 @@ export default function Home() {
       ].join("\r\n");
     }).join("\r\n");
     const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//AnoSked//Local Student Calendar//EN", "CALSCALE:GREGORIAN", events, "END:VCALENDAR"].join("\r\n");
-    triggerDownload(ics, "text/calendar;charset=utf-8", `AnoSked-${data.semester.replace(/\s+/g, "-")}.ics`);
-    setNotice("Calendar export ready.");
+    const filename = `AnoSked-${data.semester.replace(/\s+/g, "-")}.ics`;
+    const result = await shareOrDownload(new Blob([ics], { type: "text/calendar;charset=utf-8" }), filename, "Add AnoSked? to your calendar");
+    if (result !== "cancelled") setNotice(result === "shared" ? "Choose Calendar from the Share Sheet." : "Calendar file downloaded.");
   }
 
   function drawSchedule(mode: "share" | "wallpaper") {
@@ -737,12 +774,13 @@ export default function Home() {
 
     ctx.fillStyle = "#EAF6FC";
     ctx.fillRect(0, 0, width, height);
+    ctx.textAlign = "center";
     ctx.fillStyle = "#153A52";
     ctx.font = `700 ${mode === "wallpaper" ? 52 : 62}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(data.exportTitle?.trim() || (data.profile.nickname ? `${data.profile.nickname}’s week` : "My week"), margin, top - 112);
+    ctx.fillText(data.exportTitle?.trim() || (data.profile.nickname ? `${data.profile.nickname}’s week` : "My week"), width / 2, top - 112);
     ctx.fillStyle = "#56788D";
     ctx.font = `500 ${mode === "wallpaper" ? 24 : 27}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(`${data.semester}${data.block ? `  ·  ${data.block}` : ""}`, margin, top - 62);
+    ctx.fillText(`${data.semester}${data.block ? `  •  ${data.block}` : ""}`, width / 2, top - 62);
 
     ctx.fillStyle = "rgba(255,255,255,.86)";
     ctx.beginPath();
@@ -803,15 +841,15 @@ export default function Home() {
       }
     }));
 
-    ctx.textAlign = "left";
+    ctx.textAlign = "center";
     ctx.fillStyle = "#153A52";
     ctx.font = `700 ${mode === "wallpaper" ? 20 : 24}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText("Created in AnoSked?", margin, height - (mode === "wallpaper" ? 86 : 34));
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      triggerDownload(blob, "image/png", `AnoSked-${mode}-${dateKey(new Date())}.png`);
-      setNotice(mode === "wallpaper" ? "Wallpaper saved." : "Schedule image saved.");
-    }, "image/png");
+    ctx.fillText("Made with AnoSked?", width / 2, height - (mode === "wallpaper" ? 86 : 34));
+    const filename = `AnoSked-${mode}-${dateKey(new Date())}.png`;
+    void shareOrDownload(canvasBlob(canvas), filename, mode === "wallpaper" ? "AnoSked? iPhone wallpaper" : "AnoSked? weekly timetable").then((result) => {
+      if (result === "cancelled") return;
+      setNotice(result === "shared" ? "Image opened in the Share Sheet." : mode === "wallpaper" ? "Wallpaper downloaded." : "Schedule image downloaded.");
+    });
   }
 
   if (!hydrated) return <main className="loading-screen"><img className="brand-mark" src="/assets/AnoSkedicon.png" alt="" /><p>Preparing AnoSked…</p></main>;
@@ -833,9 +871,9 @@ export default function Home() {
             <div className="mini-week" aria-label="Sample weekly timetable">
               <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
               <div className="mini-week-grid">
-                <div className="mini-block one"><strong>Research</strong><span>6 PM · SV217</span></div>
-                <div className="mini-block two"><strong>Parallel Computing</strong><span>6 PM · SV213</span></div>
-                <div className="mini-block three"><strong>Ethics</strong><span>6 PM · SV213</span></div>
+                <div className="mini-block one"><strong>Web Systems</strong><span>9 AM · Lab 2</span></div>
+                <div className="mini-block two"><strong>Team Project</strong><span>1 PM · Studio</span></div>
+                <div className="mini-block three"><strong>Design Lab</strong><span>2 PM · Room 204</span></div>
               </div>
             </div>
           </div>
@@ -869,11 +907,10 @@ export default function Home() {
                 <div className="review-list">
                   {parsed.subjects.map((subject) => (
                     <div className="review-subject" key={subject.id}>
-                      <div className="subject-color" style={{ background: subject.color }} />
                       <div className="review-fields">
-                        <div className="inline-fields"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
+                        <div className="inline-fields"><label className="subject-code-input"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><i style={{ background: subject.color }} /></label><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
                         <div className="schedule-edit"><span className="meeting-days">{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={subject.meeting.start} onChange={(e) => updateParsedSubject(subject.id, "start", e.target.value)} aria-label="Start time" /></label><label>Ends<input type="time" value={subject.meeting.end} onChange={(e) => updateParsedSubject(subject.id, "end", e.target.value)} aria-label="End time" /></label><label>Room<input value={subject.meeting.room} onChange={(e) => updateParsedSubject(subject.id, "room", e.target.value)} aria-label="Room" /></label></div>
-                        <IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact />
+                        <div className="review-customize"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div>
                       </div>
                       <button className="remove-button" onClick={() => removeParsedSubject(subject.id)} aria-label={`Remove ${subject.code}`}>×</button>
                     </div>
@@ -964,8 +1001,8 @@ export default function Home() {
                   <button className={calendarMode === "day" ? "active" : ""} onClick={() => setCalendarMode("day")}>Day</button>
                   <button className={calendarMode === "week" ? "active" : ""} onClick={() => setCalendarMode("week")}>Week</button>
                 </div>
-                <button className="quiet-button icon-button" onClick={exportICS}><Icon name="calendarAdd" size={16} /> Add to calendar</button>
-                <button className="sky-button icon-button" onClick={() => setShowExportSheet(true)}><Icon name="image" size={16} /> Save image</button>
+                <button className="quiet-button icon-button" onClick={exportICS}><Icon name="calendarAdd" size={17} /> Add to calendar</button>
+                <button className="sky-button icon-button" onClick={() => setShowExportSheet(true)}><Icon name="image" size={17} /> Save image</button>
               </div>
             </div>
 
@@ -1025,8 +1062,8 @@ export default function Home() {
                 <div className="setting-content settings-form"><label>Export heading<input value={data.exportTitle || ""} onChange={(e) => setData({ ...data, exportTitle: e.target.value })} placeholder="My week" /></label><label>Name or nickname<input value={data.profile.nickname} onChange={(e) => setData({ ...data, profile: { ...data.profile, nickname: e.target.value } })} placeholder="Optional" /></label><label>Program<input value={data.profile.program} onChange={(e) => setData({ ...data, profile: { ...data.profile, program: e.target.value } })} placeholder="Optional" /></label><label>Year level<input value={data.profile.yearLevel} onChange={(e) => setData({ ...data, profile: { ...data.profile, yearLevel: e.target.value } })} placeholder="Optional" /></label><p className="autosave-note">Changes save automatically on this device.</p></div>
               </details>
               <details>
-                <summary><span className="setting-summary-main"><i><Icon name="sound" size={17} /></i><span><strong>In-app sounds</strong><small>{data.soundEffects ? "On for saves and completed tasks" : "Off by default"}</small></span></span><b>›</b></summary>
-                <div className="setting-content sound-setting"><div><strong>Gentle feedback sounds</strong><p>Plays only while AnoSked is open. Your phone controls notification sounds.</p></div><button className={`switch-control ${data.soundEffects ? "on" : ""}`} role="switch" aria-checked={Boolean(data.soundEffects)} onClick={() => { const enabled = !data.soundEffects; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div>
+                <summary><span className="setting-summary-main"><i><Icon name="sound" size={17} /></i><span><strong>In-app sounds</strong><small>{data.soundEffects !== false ? "On for task changes" : "Off"}</small></span></span><b>›</b></summary>
+                <div className="setting-content sound-setting"><div><strong>Gentle feedback sounds</strong><p>Plays when you add, finish, or delete a task while AnoSked is open. Your phone controls system notification sounds.</p></div><button className={`switch-control ${data.soundEffects !== false ? "on" : ""}`} role="switch" aria-checked={data.soundEffects !== false} onClick={() => { const enabled = data.soundEffects === false; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div>
               </details>
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="calendarAdd" size={17} /></i><span><strong>Class reminders</strong><small>Use dependable Apple or Google Calendar alerts</small></span></span><b>›</b></summary>
@@ -1187,6 +1224,10 @@ function IconPicker({ value, onChange, compact = false }: { value: IconName; onC
   return <div className={`icon-picker ${compact ? "compact" : ""}`}><span>{compact ? "Icon" : "Choose an icon"}</span><div>{SUBJECT_ICONS.map(({ icon, label }) => <button type="button" key={icon} className={value === icon ? "selected" : ""} onClick={() => onChange(icon)} aria-label={label} title={label}><Icon name={icon} size={compact ? 14 : 18} /></button>)}</div></div>;
 }
 
+function ColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+  return <div className="color-picker"><span>Color</span><div>{COLORS.map((color) => <button type="button" key={color} className={value === color ? "selected" : ""} style={{ background: color }} onClick={() => onChange(color)} aria-label={`Use color ${color}`}><i /></button>)}</div></div>;
+}
+
 function DueDateDialog({ value, onClose, onSelect }: { value: string; onClose: () => void; onSelect: (value: string) => void }) {
   const initial = value ? new Date(value) : new Date();
   if (!value) initial.setDate(initial.getDate() + 1);
@@ -1232,17 +1273,17 @@ function DueDateDialog({ value, onClose, onSelect }: { value: string; onClose: (
 
 function WelcomeTour({ onClose, onNavigate }: { onClose: () => void; onNavigate: (view: View) => void }) {
   const [step, setStep] = useState(0);
-  const steps: Array<{ title: string; detail: string; image: string; view: View }> = [
-    { title: "Today, without the guessing", detail: "See your first class, room, and full timeline at a glance. Swipe the dates to check another day.", image: "/assets/thinking.png", view: "today" },
-    { title: "Your whole week, clearly", detail: "Switch between day and week views. Save the timetable as an image or iPhone wallpaper anytime.", image: "/assets/studying.png", view: "calendar" },
-    { title: "Deadlines stay with the subject", detail: "Add a task, choose its subject, then use Next class or any custom due time.", image: "/assets/checklist.png", view: "tasks" },
+  const steps: Array<{ title: string; detail: string; image: string }> = [
+    { title: "Today, without the guessing", detail: "See your first class, room, and full timeline at a glance. Swipe the dates to check another day.", image: "/assets/thinking.png" },
+    { title: "Your whole week, clearly", detail: "Switch between day and week views. Save the timetable as an image or iPhone wallpaper anytime.", image: "/assets/studying.png" },
+    { title: "Deadlines stay with the subject", detail: "Add a task, choose its subject, then use Next class or any custom due time.", image: "/assets/checklist.png" },
   ];
   const current = steps[step];
   function finish() {
-    onNavigate(current.view);
+    onNavigate("today");
     onClose();
   }
-  return <div className="dialog-backdrop tour-layer" role="presentation"><div className="brand-dialog welcome-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title"><button className="tour-skip" onClick={onClose}>Skip</button><div className="tour-art"><img src={current.image} alt="" /></div><div className="tour-dots" aria-label={`Step ${step + 1} of ${steps.length}`}>{steps.map((item, index) => <i key={item.title} className={index === step ? "active" : ""} />)}</div><h2 id="tour-title">{current.title}</h2><p>{current.detail}</p><div className="tour-actions">{step > 0 ? <button className="quiet-button" onClick={() => setStep(step - 1)}>Back</button> : <span />}{step < steps.length - 1 ? <button className="sky-button" onClick={() => { onNavigate(current.view); setStep(step + 1); }}>Next</button> : <button className="sky-button" onClick={finish}>Show me around</button>}</div></div></div>;
+  return <div className="dialog-backdrop tour-layer" role="presentation"><div className="brand-dialog welcome-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title"><span className="tour-step-label">{step + 1} of {steps.length}</span><button className="tour-skip" onClick={onClose}>Skip</button><div className="tour-art"><img src={current.image} alt="" /></div><h2 id="tour-title">{current.title}</h2><p>{current.detail}</p><div className="tour-dots" aria-label={`Step ${step + 1} of ${steps.length}`}>{steps.map((item, index) => <i key={item.title} className={index === step ? "active" : ""} />)}</div><div className={`tour-actions ${step === 0 ? "single" : ""}`}>{step > 0 && <button className="quiet-button" onClick={() => setStep(step - 1)}>Back</button>}{step < steps.length - 1 ? <button className="sky-button" onClick={() => setStep(step + 1)}>Next</button> : <button className="sky-button" onClick={finish}>Start my week</button>}</div></div></div>;
 }
 
 function SubjectDialog({ onClose, onAdd, color }: { onClose: () => void; onAdd: (subject: Subject) => void; color: string }) {
