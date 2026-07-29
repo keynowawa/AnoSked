@@ -428,6 +428,7 @@ export default function Home() {
   const [view, setView] = useState<View>("today");
   const [calendarMode, setCalendarMode] = useState<"day" | "week">("week");
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [followingToday, setFollowingToday] = useState(true);
   const [clock, setClock] = useState(new Date());
   const [taskTitle, setTaskTitle] = useState("");
   const [taskSubject, setTaskSubject] = useState("");
@@ -486,9 +487,13 @@ export default function Home() {
   }, [notice]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setClock(new Date()), 60000);
+    const timer = window.setInterval(() => {
+      const now = new Date();
+      setClock(now);
+      if (followingToday) setSelectedDate(now);
+    }, 60000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [followingToday]);
 
   useEffect(() => {
     if (data?.tourCompleted !== false) return;
@@ -593,7 +598,7 @@ export default function Home() {
     const completeMessage = `${SHARE_MESSAGE}\n\n${SHARE_URL}`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: "AnoSked?", text: completeMessage });
+        await navigator.share({ text: completeMessage });
         setNotice("AnoSked? is ready to share.");
         return;
       }
@@ -608,6 +613,16 @@ export default function Home() {
         setNotice(`Share this link: ${SHARE_URL}`);
       }
     }
+  }
+
+  function selectDate(date: Date) {
+    setSelectedDate(date);
+    setFollowingToday(dateKey(date) === dateKey(new Date()));
+  }
+
+  function goToToday() {
+    setFollowingToday(true);
+    setSelectedDate(new Date());
   }
 
   function saveSchedule() {
@@ -944,7 +959,7 @@ export default function Home() {
             <img className="hero-mascot" src="/assets/default.png" alt="AnoSked carabao mascot" />
             <h1>Your week,<br />minus the chaos.</h1>
             <p>Paste your enrolled subjects once. Get a readable week with every class, room, and task in the right place.</p>
-            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><button className="hero-share-button" onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></div>
+            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><button className="install-button" onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></div>
             <div className="mini-week" aria-label="Sample weekly timetable">
               <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
               <div className="mini-week-grid">
@@ -1037,10 +1052,10 @@ export default function Home() {
           <div className="page today-page">
             <div className="page-title-row mascot-title dashboard-title">
               <div><span className="dashboard-term">{data.semester}{data.block ? ` · ${data.block}` : ""}</span><span className="dashboard-greeting">{greeting(clock)}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `${selectedWeekday} at a glance.`}</h1><p><strong>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })}</strong> · {dashboardSummary}</p></div>
-              <div className="dashboard-title-side"><img src="/assets/thinking.png" alt="AnoSked thinking" /><button className="date-button" onClick={() => setSelectedDate(new Date())}>Today</button></div>
+              <div className="dashboard-title-side"><img src="/assets/thinking.png" alt="AnoSked thinking" /><button className="date-button" onClick={goToToday}>Today</button></div>
             </div>
             {semesterEnded && <div className="semester-banner"><span><Icon name="calendar" size={18} /></span><div><strong>Semester complete</strong><p>Old recurring classes are inactive. Your schedule and tasks remain on your device until you replace or delete them.</p></div><button onClick={exportBackup}>Export backup</button></div>}
-            <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
+            <DayStrip selectedDate={selectedDate} onSelect={selectDate} />
             <div className="today-layout">
               <div className="timeline-card">
                 <div className="section-heading"><h2>Timeline</h2><span>{DAY_META.find((day) => day.code === dayCode)?.label}</span></div>
@@ -1085,7 +1100,7 @@ export default function Home() {
 
             {calendarMode === "day" ? (
               <>
-                <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
+                <DayStrip selectedDate={selectedDate} onSelect={selectDate} />
                 <div className="day-calendar">
                   <div className="day-calendar-heading"><strong>{DAY_META.find((day) => day.code === dayCode)?.label}</strong><span>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</span></div>
                   {daySubjects.length ? daySubjects.map((subject) => (
@@ -1202,7 +1217,7 @@ export default function Home() {
       {showReport && <ReportDialog onClose={() => setShowReport(false)} />}
       {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
       {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
-      {showTour && <WelcomeTour onClose={() => { setShowTour(false); setData({ ...data, tourCompleted: true }); }} onNavigate={(nextView) => { setView(nextView); if (nextView === "today") setSelectedDate(new Date()); }} />}
+      {showTour && <WelcomeTour onClose={() => { setShowTour(false); setData({ ...data, tourCompleted: true }); }} onNavigate={(nextView) => { setView(nextView); if (nextView === "today") goToToday(); }} />}
       {!data.consent && <ConsentDialog onAccept={() => setData({ ...data, consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" } })} onPolicy={setPolicy} />}
       {notice && <BrandedToast message={notice} />}
     </main>
@@ -1291,7 +1306,8 @@ function DayStrip({ selectedDate, onSelect }: { selectedDate: Date; onSelect: (d
   const mondayOffset = (start.getDay() + 6) % 7;
   start.setDate(start.getDate() - mondayOffset);
   const days = Array.from({ length: 7 }, (_, index) => { const date = new Date(start); date.setDate(start.getDate() + index); return date; });
-  return <div className="day-strip" aria-label="Choose a day">{days.map((date) => { const selected = dateKey(date) === dateKey(selectedDate); const today = dateKey(date) === dateKey(new Date()); return <button key={dateKey(date)} className={`${selected ? "selected" : ""} ${today ? "is-today" : ""}`} onClick={() => onSelect(date)}><span>{date.toLocaleDateString("en-PH", { weekday: "short" })}</span><strong>{date.getDate()}</strong><i /></button>; })}</div>;
+  const moveWeek = (amount: number) => { const next = new Date(selectedDate); next.setDate(next.getDate() + amount * 7); onSelect(next); };
+  return <div className="week-picker"><button className="week-arrow" onClick={() => moveWeek(-1)} aria-label="Previous week" title="Previous week">‹</button><div className="day-strip" aria-label="Choose a day">{days.map((date) => { const selected = dateKey(date) === dateKey(selectedDate); const today = dateKey(date) === dateKey(new Date()); return <button key={dateKey(date)} className={`${selected ? "selected" : ""} ${today ? "is-today" : ""}`} onClick={() => onSelect(date)}><span>{date.toLocaleDateString("en-PH", { weekday: "short" })}</span><strong>{date.getDate()}</strong><i /></button>; })}</div><button className="week-arrow" onClick={() => moveWeek(1)} aria-label="Next week" title="Next week">›</button></div>;
 }
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
