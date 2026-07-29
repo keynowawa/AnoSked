@@ -77,9 +77,17 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "calculator" | "globe" | "backup" | "profile" | "trash" | "sound" | "edit";
+type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "share" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "calculator" | "globe" | "backup" | "profile" | "trash" | "sound" | "edit";
 
 const STORAGE_KEY = "anosked.local.v1";
+const SHARE_URL = "https://anosked.vercel.app";
+const SHARE_MESSAGE = `Meet AnoSked? 📅
+
+Paste your enrolled subjects and turn them into a clear daily timeline and weekly schedule in seconds. Save your timetable as a phone wallpaper, add tasks under each subject, and install AnoSked? on your Home Screen for quick access.
+
+No account needed. Your schedule stays on your device.
+
+Your classes, rooms, and deadlines, all one tap away.`;
 const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#B86B5E", "#A8628E", "#4F8668"];
 const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number }> = [
   { code: "MO", short: "Mon", label: "Monday", js: 1 },
@@ -389,6 +397,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   if (name === "settings") return <svg {...common}><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>;
   if (name === "about") return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.2h.01" /></svg>;
   if (name === "install") return <svg {...common}><path d="M12 3v11m0 0 4-4m-4 4-4-4" /><path d="M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" /></svg>;
+  if (name === "share") return <svg {...common}><rect x="5" y="9" width="14" height="12" rx="3" /><path d="M12 16V3m0 0L8 7m4-4 4 4" /></svg>;
   if (name === "image") return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="9" cy="9" r="2" /><path d="m5 17 4-4 3 3 2-2 5 4" /></svg>;
   if (name === "calendarAdd") return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M8 3v4M16 3v4M3 10h18M12 13v5M9.5 15.5h5" /></svg>;
   if (name === "jump") return <svg {...common}><path d="M12 4v13m0 0 5-5m-5 5-5-5M6 21h12" /></svg>;
@@ -433,6 +442,7 @@ export default function Home() {
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [showTour, setShowTour] = useState(false);
+  const [shareLogoFile, setShareLogoFile] = useState<File | null>(null);
   const [policy, setPolicy] = useState<"privacy" | "terms" | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
@@ -462,6 +472,15 @@ export default function Home() {
     };
     window.addEventListener("beforeinstallprompt", captureInstall);
     return () => window.removeEventListener("beforeinstallprompt", captureInstall);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/assets/AnoSkedfinallogo.png")
+      .then((response) => response.ok ? response.blob() : Promise.reject())
+      .then((blob) => { if (active) setShareLogoFile(new File([blob], "AnoSked-logo.png", { type: blob.type || "image/png" })); })
+      .catch(() => undefined);
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -578,6 +597,31 @@ export default function Home() {
     const choice = await installPrompt.userChoice;
     if (choice.outcome === "accepted") setNotice("AnoSked is being added to your Home Screen.");
     setInstallPrompt(null);
+  }
+
+  async function shareAnoSked() {
+    const completeMessage = `${SHARE_MESSAGE}\n\n${SHARE_URL}`;
+    try {
+      if (navigator.share) {
+        if (shareLogoFile && navigator.canShare?.({ files: [shareLogoFile] })) {
+          await navigator.share({ title: "AnoSked?", text: completeMessage, files: [shareLogoFile] });
+        } else {
+          await navigator.share({ title: "AnoSked?", text: SHARE_MESSAGE, url: SHARE_URL });
+        }
+        setNotice("AnoSked? is ready to share.");
+        return;
+      }
+      await navigator.clipboard.writeText(completeMessage);
+      setNotice("Promo message and link copied.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      try {
+        await navigator.clipboard.writeText(completeMessage);
+        setNotice("Promo message and link copied.");
+      } catch {
+        setNotice(`Share this link: ${SHARE_URL}`);
+      }
+    }
   }
 
   function saveSchedule() {
@@ -780,7 +824,7 @@ export default function Home() {
     const result = await shareOrDownload(new Blob([ics], { type: "text/calendar;charset=utf-8" }), filename, "Add AnoSked? to your calendar");
     if (result !== "cancelled") {
       if (data.soundEffects !== false) playFeedbackTone();
-      setNotice(result === "shared" ? "Choose Calendar from the Share Sheet." : "Calendar file downloaded.");
+      setNotice(result === "shared" ? "Choose Calendar from your device’s sharing menu." : "Calendar file downloaded.");
     }
   }
 
@@ -895,7 +939,7 @@ export default function Home() {
     void shareOrDownload(blob, filename, mode === "wallpaper" ? "AnoSked? iPhone wallpaper" : "AnoSked? weekly timetable").then((result) => {
       if (result === "cancelled") return;
       if (data.soundEffects !== false) playFeedbackTone();
-      setNotice(result === "shared" ? "Image opened in the Share Sheet." : "Sharing is unavailable, so the PNG was saved instead.");
+      setNotice(result === "shared" ? "Image opened in your device’s sharing menu." : "Sharing is unavailable, so the PNG was saved instead.");
     });
   }
 
@@ -914,7 +958,7 @@ export default function Home() {
             <img className="hero-mascot" src="/assets/default.png" alt="AnoSked carabao mascot" />
             <h1>Your week,<br />minus the chaos.</h1>
             <p>Paste your enrolled subjects once. Get a readable week with every class, room, and task in the right place.</p>
-            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><a href="#import">Set up my schedule</a></div>
+            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><a href="#import">Set up my schedule</a><button className="hero-share-button" onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></div>
             <div className="mini-week" aria-label="Sample weekly timetable">
               <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
               <div className="mini-week-grid">
@@ -1133,6 +1177,7 @@ export default function Home() {
               <section><h2>Built to stay local</h2><p>Your pasted text, subjects, tasks, and optional profile stay in this browser. AnoSked has no account system, creator-accessible database, or analytics tracker.</p><button onClick={() => setPolicy("privacy")}>Read Privacy Notice</button></section>
               <section><h2>Keep your official record close</h2><p>AnoSked helps you read and remember your schedule, but your school’s official portal remains the source of truth.</p><button onClick={() => setPolicy("terms")}>Read Terms</button></section>
               <section><h2>Install when you’re ready</h2><p>Add AnoSked to your Home Screen for a full-screen, app-like experience on supported phones and tablets.</p><button onClick={requestInstall}><Icon name="install" size={15} /> Install AnoSked?</button></section>
+              <section><h2>Share it with a classmate</h2><p>Send the AnoSked? logo, a quick introduction, and the official public link through your device’s sharing menu.</p><button onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></section>
               <section><h2>Your consent</h2><p>Privacy Notice and Terms accepted {data.consent?.acceptedAt ? new Date(data.consent.acceptedAt).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }) : "on this device"}.</p></section>
               <section><h2>Found something off?</h2><p>Prepare a privacy-safe bug report and share it through any app you choose. AnoSked sends nothing automatically.</p><button onClick={() => setShowReport(true)}>Prepare bug report</button></section>
             </div>
@@ -1383,7 +1428,7 @@ function InstallDialog({ onClose }: { onClose: () => void }) {
 }
 
 function ExportDialog({ onClose, onWallpaper, onImage, onShare }: { onClose: () => void; onWallpaper: () => void; onImage: () => void; onShare: () => void }) {
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.png" alt="" /><h2 id="export-title">Save your weekly timetable</h2><p>Save a file directly to your device, or open the separate sharing option.</p><div className="export-choices"><button onClick={onWallpaper}><Icon name="today" /><span><strong>Save iPhone wallpaper</strong><small>Leaves room for the Lock Screen clock and widgets</small></span></button><button onClick={onImage}><Icon name="image" /><span><strong>Save PNG image</strong><small>Downloads the weekly timetable to this device</small></span></button><button className="share-export-choice" onClick={onShare}><Icon name="install" /><span><strong>Share PNG image</strong><small>Opens the Share Sheet when your device supports it</small></span></button></div></div></div>;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.png" alt="" /><h2 id="export-title">Save your weekly timetable</h2><p>Save a file directly to your device, or open the separate sharing option.</p><div className="export-choices"><button onClick={onWallpaper}><Icon name="today" /><span><strong>Save iPhone wallpaper</strong><small>Leaves room for the Lock Screen clock and widgets</small></span></button><button onClick={onImage}><Icon name="image" /><span><strong>Save PNG image</strong><small>Downloads the weekly timetable to your device</small></span></button><button className="share-export-choice" onClick={onShare}><Icon name="share" /><span><strong>Share PNG image</strong><small>Opens your device’s sharing menu</small></span></button></div></div></div>;
 }
 
 function PolicyDialog({ type, onClose }: { type: "privacy" | "terms"; onClose: () => void }) {
