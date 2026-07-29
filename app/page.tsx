@@ -377,23 +377,49 @@ function parseEnrollment(text: string): { result?: ParseResult; issue?: ParseIss
 }
 
 async function createLocalOcrWorker(onProgress: (message: string) => void) {
-  const { createWorker } = await import("tesseract.js");
-  return createWorker("eng", 1, {
+  const { createWorker, PSM } = await import("tesseract.js");
+  const worker = await createWorker("eng", 1, {
     workerPath: "/ocr/worker.min.js",
     corePath: "/ocr/core",
     langPath: "/ocr",
     logger: (event) => {
-      if (event.status === "recognizing text") onProgress(`Reading timetable… ${Math.round((event.progress || 0) * 100)}%`);
+      if (event.status === "loading tesseract core") onProgress("Starting the local reader…");
+      else if (event.status === "loading language traineddata") onProgress("Loading the text reader…");
+      else if (event.status === "initializing api") onProgress("Almost ready…");
+      else if (event.status === "recognizing text") onProgress(`Reading timetable… ${Math.round((event.progress || 0) * 100)}%`);
     },
   });
+  await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: "1" });
+  return worker;
+}
+
+async function preparePhotoForOcr(file: File) {
+  const bitmap = await createImageBitmap(file);
+  const longestSide = Math.max(bitmap.width, bitmap.height);
+  const scale = Math.min(1, 2200 / longestSide);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) {
+    bitmap.close();
+    throw new Error("This browser could not prepare the photo.");
+  }
+  context.fillStyle = "white";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.filter = "grayscale(1) contrast(1.18)";
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas;
 }
 
 async function extractScheduleFile(file: File, onProgress: (message: string) => void) {
   if (file.type.startsWith("image/")) {
-    onProgress("Preparing the photo…");
+    onProgress("Optimizing the photo…");
+    const canvas = await preparePhotoForOcr(file);
     const worker = await createLocalOcrWorker(onProgress);
     try {
-      const result = await worker.recognize(file);
+      const result = await worker.recognize(canvas);
       return result.data.text.trim();
     } finally {
       await worker.terminate();
@@ -491,24 +517,35 @@ function playFeedbackTone(kind: "save" | "complete" | "delete" = "save") {
   const context = new AudioContextClass();
   if (context.state === "suspended") void context.resume();
   const tones = kind === "complete"
-    ? [{ frequency: 523, delay: 0, duration: .14 }, { frequency: 659, delay: .09, duration: .18 }]
+    ? [{ frequency: 523.25, delay: 0, duration: .16 }, { frequency: 659.25, delay: .075, duration: .18 }, { frequency: 783.99, delay: .15, duration: .22 }]
     : kind === "delete"
-      ? [{ frequency: 392, delay: 0, duration: .12 }, { frequency: 330, delay: .08, duration: .16 }]
-      : [{ frequency: 440, delay: 0, duration: .12 }, { frequency: 554, delay: .07, duration: .16 }];
+      ? [{ frequency: 659.25, delay: 0, duration: .13 }, { frequency: 523.25, delay: .085, duration: .19 }]
+      : [{ frequency: 659.25, delay: 0, duration: .14 }, { frequency: 783.99, delay: .08, duration: .19 }];
   tones.forEach((tone, index) => {
     const oscillator = context.createOscillator();
+    const shimmer = context.createOscillator();
     const gain = context.createGain();
+    const shimmerGain = context.createGain();
     const start = context.currentTime + tone.delay;
     const end = start + tone.duration;
     oscillator.type = "sine";
+    shimmer.type = "triangle";
     oscillator.frequency.setValueAtTime(tone.frequency, start);
+    shimmer.frequency.setValueAtTime(tone.frequency * 2, start);
     gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.055, start + .018);
+    gain.gain.exponentialRampToValueAtTime(0.036, start + .018);
     gain.gain.exponentialRampToValueAtTime(0.0001, end);
+    shimmerGain.gain.setValueAtTime(0.0001, start);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.006, start + .014);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, end - .01);
     oscillator.connect(gain);
+    shimmer.connect(shimmerGain);
     gain.connect(context.destination);
+    shimmerGain.connect(context.destination);
     oscillator.start(start);
+    shimmer.start(start);
     oscillator.stop(end);
+    shimmer.stop(end);
     if (index === tones.length - 1) oscillator.addEventListener("ended", () => void context.close());
   });
 }
@@ -634,6 +671,8 @@ export default function Home() {
   const [showExportSheet, setShowExportSheet] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [showSubjectForm, setShowSubjectForm] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
+  const [subjectPendingDelete, setSubjectPendingDelete] = useState<Subject | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [showTour, setShowTour] = useState(false);
   const [policy, setPolicy] = useState<"privacy" | "terms" | null>(null);
@@ -932,12 +971,25 @@ export default function Home() {
     setParsed({ ...parsed, subjects: parsed.subjects.map((subject) => subject.id === id ? { ...subject, color } : subject) });
   }
 
-  function addSubject(subject: Subject) {
+  function saveSubject(subject: Subject) {
     if (!data) return;
-    setData({ ...data, subjects: [...data.subjects, subject], totalUnits: data.totalUnits + subject.units });
+    const editing = data.subjects.some((item) => item.id === subject.id);
+    const subjects = editing ? data.subjects.map((item) => item.id === subject.id ? subject : item) : [...data.subjects, subject];
+    setData({ ...data, subjects, totalUnits: subjects.reduce((sum, item) => sum + item.units, 0) });
     if (data.soundEffects !== false) playFeedbackTone();
     setShowSubjectForm(false);
-    setNotice(`${subject.title} was added.`);
+    setEditingSubject(null);
+    setNotice(editing ? `${subject.title} was updated.` : `${subject.title} was added.`);
+  }
+
+  function deleteSubject() {
+    if (!data || !subjectPendingDelete) return;
+    const subjects = data.subjects.filter((subject) => subject.id !== subjectPendingDelete.id);
+    setData({ ...data, subjects, tasks: data.tasks.filter((task) => task.subjectId !== subjectPendingDelete.id), totalUnits: subjects.reduce((sum, subject) => sum + subject.units, 0) });
+    if (taskSubject === subjectPendingDelete.id) setTaskSubject("");
+    if (data.soundEffects !== false) playFeedbackTone("delete");
+    setSubjectPendingDelete(null);
+    setNotice("Class deleted.");
   }
 
   function createTask() {
@@ -1202,7 +1254,7 @@ export default function Home() {
             <img className="hero-mascot" src="/assets/default.png" alt="AnoSked carabao mascot" />
             <h1>Your week,<br />minus the chaos.</h1>
             <p>Paste your enrolled subjects once. Get a readable week with every class, room, and task in the right place.</p>
-            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><button className="install-button" onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></div>
+            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><button className="install-button hero-share-button" onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></div>
             <div className="mini-week" aria-label="Sample weekly timetable">
               <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
               <div className="mini-week-grid">
@@ -1217,14 +1269,9 @@ export default function Home() {
             {stage === "paste" ? (
               <>
                 <div className="card-heading">
-                  <div><h2>Paste your subjects</h2><p>We’ll find the subject names, rooms, days, and times.</p></div>
+                  <div><h2>Add your schedule</h2><p>Paste a subject list, then check what AnoSked? finds.</p></div>
                 </div>
                 <textarea value={paste} onChange={(event) => { setPaste(event.target.value); setIssue(null); }} placeholder="Paste your enrolled subjects here…" aria-label="Subject enlistment text" />
-                <div className="schedule-file-import">
-                  <input ref={scheduleFileInput} type="file" accept="image/*,application/pdf,.pdf" onChange={importScheduleFile} hidden />
-                  <button className="file-import-button" onClick={() => scheduleFileInput.current?.click()} disabled={importingFile}><Icon name="image" size={17} /><span><strong>{importingFile ? fileImportStatus || "Reading your timetable…" : "Add a photo or PDF"}</strong><small>Read locally on your device · 20 MB maximum</small></span></button>
-                  <button className="manual-import-button" onClick={startManualSchedule} disabled={importingFile}>Enter classes manually</button>
-                </div>
                 {issue && (
                   <div className="error-panel" role="alert">
                     <img src="/assets/thinking.png" alt="" />
@@ -1235,6 +1282,14 @@ export default function Home() {
                   <button className="secondary-button" onClick={() => { setPaste(SAMPLE); setIssue(null); }}>Try sample</button>
                   <button className="primary-button" onClick={runParser}>Continue</button>
                 </div>
+                <details className="alternative-imports">
+                  <summary><span><strong>Other ways to add it</strong><small>Photo, PDF, or manual entry</small></span><b>›</b></summary>
+                  <div className="schedule-file-import">
+                    <input ref={scheduleFileInput} type="file" accept="image/*,application/pdf,.pdf" onChange={importScheduleFile} hidden />
+                    <button className="file-import-button" onClick={() => scheduleFileInput.current?.click()} disabled={importingFile}><Icon name="image" size={17} /><span><strong>{importingFile ? fileImportStatus || "Reading your timetable…" : "Choose photo or PDF"}</strong><small>{importingFile ? "Keep AnoSked? open while it reads" : "Processed locally · 20 MB maximum"}</small></span></button>
+                    <button className="manual-import-button" onClick={startManualSchedule} disabled={importingFile}>Enter manually</button>
+                  </div>
+                </details>
                 <p className="one-line-privacy">Text, photos, and PDFs are read privately on your device. AnoSked does not upload them, and student numbers are ignored.</p>
               </>
             ) : parsed ? (
@@ -1250,7 +1305,7 @@ export default function Home() {
                       <div className="review-fields">
                         <div className="inline-fields"><label className="subject-code-input"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><i style={{ background: subject.color }} /></label><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
                         <div className="review-meetings">{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="schedule-edit" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><span className="meeting-days">{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={meeting.start} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "start", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} start time`} /></label><label>Ends<input type="time" value={meeting.end} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "end", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} end time`} /></label><label>Room<input value={meeting.room} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "room", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} room`} /></label></div>)}</div>
-                        <details className="review-customize"><summary><span>Customize</span><span className="review-look-preview"><Icon name={subject.icon || subjectIcon(subject)} size={14} /><i style={{ background: subject.color }} /><b>›</b></span></summary><div className="review-customize-panel"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div></details>
+                        <details className="review-customize"><summary><span>Icon and color</span><span className="review-look-preview"><Icon name={subject.icon || subjectIcon(subject)} size={14} /><i style={{ background: subject.color }} /><b>›</b></span></summary><div className="review-customize-panel"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div></details>
                       </div>
                       <button className="remove-button" onClick={() => removeParsedSubject(subject.id)} aria-label={`Remove ${subject.code}`}>×</button>
                     </div>
@@ -1273,7 +1328,7 @@ export default function Home() {
         </section>
         <footer className="public-footer"><span>© 2026 AnoSked? · Created by Kyann Tagle</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button><button onClick={() => setShowInstallGuide(true)}>Install help</button></nav></footer>
         {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
-        {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onAdd={addParsedSubject} color={COLORS[(parsed?.subjects.length || 0) % COLORS.length]} />}
+        {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onSave={addParsedSubject} color={COLORS[(parsed?.subjects.length || 0) % COLORS.length]} />}
         {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
         {notice && <BrandedToast message={notice} />}
       </main>
@@ -1301,7 +1356,7 @@ export default function Home() {
         {view === "today" && (
           <div className="page today-page">
             <div className="page-title-row mascot-title dashboard-title">
-              <div><span className="dashboard-term">{data.semester}{data.block ? ` · ${data.block}` : ""}</span><span className="dashboard-greeting">{greeting(clock)}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `${selectedWeekday} at a glance.`}</h1><p><strong>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })}</strong> · {dashboardSummary}</p></div>
+              <div className="dashboard-title-copy"><span className="dashboard-term">{data.semester}{data.block ? ` · ${data.block}` : ""}</span><span className="dashboard-greeting">{greeting(clock)}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `${selectedWeekday} at a glance.`}</h1><p className="dashboard-date">{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })}</p>{firstDaySubject ? <div className="dashboard-brief"><span>{daySubjects.length} {daySubjects.length === 1 ? "class" : "classes"}</span><div><small>First</small><strong>{compactTitle(firstDaySubject.subject.title, 34)}</strong><b>{formatTime(firstDaySubject.meeting.start).replace(":00", "")} · {firstDaySubject.meeting.room}</b></div></div> : <p className="dashboard-empty-summary">{dashboardSummary}</p>}</div>
               <div className="dashboard-title-side"><img src="/assets/thinking.png" alt="AnoSked thinking" /><button className="date-button" onClick={goToToday}>Today</button></div>
             </div>
             {semesterEnded && <div className="semester-banner"><span><Icon name="calendar" size={18} /></span><div><strong>Semester complete</strong><p>Old recurring classes are inactive. Your schedule and tasks remain on your device until you replace or delete them.</p></div><button onClick={exportBackup}>Export backup</button></div>}
@@ -1386,8 +1441,8 @@ export default function Home() {
 
         {view === "subjects" && (
           <div className="page subjects-page">
-            <div className="page-title-row"><div><h1>Subjects</h1><p>{data.subjects.length} subjects · {data.totalUnits} units · Rooms and schedules in one place.</p></div><button className="sky-button icon-button" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={16} /> Add class or activity</button></div>
-            <div className="subject-grid">{data.subjects.map((subject) => <article className="subject-card" key={subject.id}><div className="subject-card-top"><span className="subject-bubble" style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={21} /></span><span className="unit-pill">{subject.units > 0 ? `${subject.units} units` : "Units not listed"}</span></div><h2>{subject.title}</h2><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span>{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="subject-meeting" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><div className="subject-detail"><span>{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><strong>{formatTime(meeting.start)}–{formatTime(meeting.end)}</strong></div><div className="subject-room"><span>Room</span><strong>{meeting.room}</strong></div></div>)}<div className="subject-task-count">{data.tasks.filter((task) => task.subjectId === subject.id && !task.done).length} open tasks</div></article>)}</div>
+            <div className="page-title-row"><div><h1>Subjects</h1><p>{data.subjects.length} subjects · {data.totalUnits} units · Rooms and schedules in one place.</p></div><button className="sky-button icon-button" onClick={() => { setEditingSubject(null); setShowSubjectForm(true); }}><Icon name="subjects" size={16} /> Add class or activity</button></div>
+            <div className="subject-grid">{data.subjects.map((subject) => <article className="subject-card" key={subject.id}><div className="subject-card-top"><span className="subject-bubble" style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={21} /></span><div className="subject-card-tools"><span className="unit-pill">{subject.units > 0 ? `${subject.units} units` : "Units not listed"}</span><button onClick={() => { setEditingSubject(subject); setShowSubjectForm(true); }} aria-label={`Edit ${subject.title}`} title="Edit class"><Icon name="edit" size={14} /></button><button className="subject-delete-button" onClick={() => setSubjectPendingDelete(subject)} aria-label={`Delete ${subject.title}`} title="Delete class"><Icon name="trash" size={14} /></button></div></div><h2>{subject.title}</h2><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span>{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="subject-meeting" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><div className="subject-detail"><span>{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><strong>{formatTime(meeting.start)}–{formatTime(meeting.end)}</strong></div><div className="subject-room"><span>Room</span><strong>{meeting.room}</strong></div></div>)}<div className="subject-task-count">{data.tasks.filter((task) => task.subjectId === subject.id && !task.done).length} open tasks</div></article>)}</div>
           </div>
         )}
 
@@ -1405,7 +1460,7 @@ export default function Home() {
               </details>
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="sound" size={17} /></i><span><strong>In-app sounds</strong><small>{data.soundEffects !== false ? "On for helpful confirmations" : "Off"}</small></span></span><b>›</b></summary>
-                <div className="setting-content sound-setting"><div className="sound-setting-copy"><strong>Gentle feedback sounds</strong><p>Hear a short confirmation after schedule setup, task changes, class additions, backups, and exports. Navigation stays quiet.</p></div><div className="sound-setting-controls"><button className="quiet-button" onClick={() => playFeedbackTone("complete")}>Play sample</button><button className={`switch-control ${data.soundEffects !== false ? "on" : ""}`} role="switch" aria-label="In-app sounds" aria-checked={data.soundEffects !== false} onClick={() => { const enabled = data.soundEffects === false; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div></div>
+                <div className="setting-content sound-setting"><div className="sound-setting-copy"><strong>AnoSked? chime</strong><p>A soft signature sound confirms saves, completed tasks, and changes. Moving around the app stays quiet.</p></div><div className="sound-setting-controls"><button className="quiet-button" onClick={() => playFeedbackTone("complete")}>Play chime</button><button className={`switch-control ${data.soundEffects !== false ? "on" : ""}`} role="switch" aria-label="In-app sounds" aria-checked={data.soundEffects !== false} onClick={() => { const enabled = data.soundEffects === false; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div></div>
               </details>
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="calendarAdd" size={17} /></i><span><strong>Class reminders</strong><small>Use dependable Apple or Google Calendar alerts</small></span></span><b>›</b></summary>
@@ -1461,8 +1516,18 @@ export default function Home() {
           </div>
         </div>
       )}
+      {subjectPendingDelete && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSubjectPendingDelete(null); }}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-subject-title">
+            <img src="/assets/thinking.png" alt="" />
+            <h2 id="delete-subject-title">Delete this class?</h2>
+            <p>“{compactTitle(subjectPendingDelete.title, 64)}” and {(() => { const count = data.tasks.filter((task) => task.subjectId === subjectPendingDelete.id).length; return `${count} linked ${count === 1 ? "task" : "tasks"}`; })()} will be removed from this device.</p>
+            <div><button className="quiet-button" onClick={() => setSubjectPendingDelete(null)}>Keep class</button><button className="confirm-delete" onClick={deleteSubject}>Delete class</button></div>
+          </div>
+        </div>
+      )}
       {showExportSheet && <ExportDialog onClose={() => setShowExportSheet(false)} onWallpaper={() => { setShowExportSheet(false); drawSchedule("wallpaper", "save"); }} onImage={() => { setShowExportSheet(false); drawSchedule("image", "save"); }} onShare={() => { setShowExportSheet(false); drawSchedule("image", "share"); }} />}
-      {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onAdd={addSubject} color={COLORS[data.subjects.length % COLORS.length]} />}
+      {showSubjectForm && <SubjectDialog onClose={() => { setShowSubjectForm(false); setEditingSubject(null); }} onSave={saveSubject} color={editingSubject?.color || COLORS[data.subjects.length % COLORS.length]} initial={editingSubject || undefined} />}
       {showDuePicker && <DueDateDialog value={taskDue} onClose={() => setShowDuePicker(false)} onSelect={(value) => { setTaskDue(value); setShowDuePicker(false); }} />}
       {showReport && <ReportDialog onClose={() => setShowReport(false)} />}
       {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
@@ -1630,29 +1695,32 @@ function WelcomeTour({ onClose, onNavigate }: { onClose: () => void; onNavigate:
   return <div className="dialog-backdrop tour-layer" role="presentation"><div className="brand-dialog welcome-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title"><span className="tour-step-label">{step + 1} of {steps.length}</span><button className="tour-skip" onClick={onClose}>Skip</button><div className="tour-art"><img src={current.image} alt="" /></div><h2 id="tour-title">{current.title}</h2><p>{current.detail}</p><div className="tour-dots" aria-label={`Step ${step + 1} of ${steps.length}`}>{steps.map((item, index) => <i key={item.title} className={index === step ? "active" : ""} />)}</div><div className={`tour-actions ${step === 0 ? "single" : ""}`}>{step > 0 && <button className="quiet-button" onClick={() => setStep(step - 1)}>Back</button>}{step < steps.length - 1 ? <button className="sky-button" onClick={() => setStep(step + 1)}>Next</button> : <button className="sky-button" onClick={finish}>Start my week</button>}</div></div></div>;
 }
 
-function SubjectDialog({ onClose, onAdd, color }: { onClose: () => void; onAdd: (subject: Subject) => void; color: string }) {
-  const [title, setTitle] = useState("");
-  const [code, setCode] = useState("");
-  const [room, setRoom] = useState("");
-  const [start, setStart] = useState("08:00");
-  const [end, setEnd] = useState("09:00");
-  const [units, setUnits] = useState("0");
-  const [days, setDays] = useState<DayCode[]>(["MO"]);
-  const [icon, setIcon] = useState<IconName>("book");
+function SubjectDialog({ onClose, onSave, color, initial }: { onClose: () => void; onSave: (subject: Subject) => void; color: string; initial?: Subject }) {
+  const [title, setTitle] = useState(initial?.title || "");
+  const [code, setCode] = useState(initial?.code || "");
+  const [units, setUnits] = useState(String(initial?.units || 0));
+  const [icon, setIcon] = useState<IconName>(initial?.icon || (initial ? subjectIcon(initial) : "book"));
+  const [selectedColor, setSelectedColor] = useState(initial?.color || color);
+  const [meetings, setMeetings] = useState<Meeting[]>(initial ? subjectMeetings(initial).map((meeting) => ({ ...meeting, days: [...meeting.days] })) : [{ days: ["MO"], start: "08:00", end: "09:00", room: "TBA" }]);
   const [error, setError] = useState("");
 
-  function toggleDay(day: DayCode) {
-    setDays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day]);
+  function updateMeeting(index: number, field: "start" | "end" | "room", value: string) {
+    setMeetings((current) => current.map((meeting, meetingIndex) => meetingIndex === index ? { ...meeting, [field]: value } : meeting));
+  }
+
+  function toggleDay(meetingIndex: number, day: DayCode) {
+    setMeetings((current) => current.map((meeting, index) => index === meetingIndex ? { ...meeting, days: meeting.days.includes(day) ? meeting.days.filter((item) => item !== day) : [...meeting.days, day] } : meeting));
   }
 
   function submit() {
     if (!title.trim()) { setError("Add a name for this class or activity."); return; }
-    if (!days.length) { setError("Choose at least one meeting day."); return; }
-    if (!start || !end || end <= start) { setError("The end time must be after the start time."); return; }
-    onAdd({ id: uid("sub"), code: code.trim().toUpperCase() || "ACTIVITY", title: title.trim(), units: Math.max(0, Number(units) || 0), color, icon, meeting: { days, start, end, room: room.trim() || "TBA" } });
+    if (meetings.some((meeting) => !meeting.days.length)) { setError("Choose at least one day for every meeting."); return; }
+    if (meetings.some((meeting) => !meeting.start || !meeting.end || meeting.end <= meeting.start)) { setError("Every meeting must end after it starts."); return; }
+    const normalizedMeetings = meetings.map((meeting) => ({ ...meeting, room: meeting.room.trim() || "TBA" }));
+    onSave({ ...initial, id: initial?.id || uid("sub"), code: code.trim().toUpperCase() || "ACTIVITY", title: title.trim(), units: Math.max(0, Number(units) || 0), color: selectedColor, icon, meeting: normalizedMeetings[0], meetings: normalizedMeetings });
   }
 
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog subject-dialog" role="dialog" aria-modal="true" aria-labelledby="subject-dialog-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/studying.png" alt="" /><h2 id="subject-dialog-title">Add a class or activity</h2><p>Use this for an added class, organization work, review session, or recurring commitment.</p><div className="subject-form"><label className="wide-field">Name<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Robotics Club meeting" /></label><label>Code <small>Optional</small><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ORG" /></label><label>Room or place <small>Optional</small><input value={room} onChange={(event) => setRoom(event.target.value)} placeholder="e.g. Library" /></label><div className="wide-field day-picker"><span>Meeting days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={days.includes(day.code) ? "selected" : ""} onClick={() => toggleDay(day.code)}>{day.short}</button>)}</div></div><label>Starts<input type="time" value={start} onChange={(event) => setStart(event.target.value)} /></label><label>Ends<input type="time" value={end} onChange={(event) => setEnd(event.target.value)} /></label><label>Units <small>Optional</small><input type="number" min="0" step="1" value={units} onChange={(event) => setUnits(event.target.value)} /></label><div className="wide-field"><IconPicker value={icon} onChange={setIcon} /></div></div>{error && <p className="form-error">{error}</p>}<button className="sky-button wide-dialog" onClick={submit}>Add to my schedule</button></div></div>;
+  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog subject-dialog" role="dialog" aria-modal="true" aria-labelledby="subject-dialog-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/studying.png" alt="" /><h2 id="subject-dialog-title">{initial ? "Edit class or activity" : "Add a class or activity"}</h2><p>Keep the essentials together. You can add another meeting when the time changes on a different day.</p><div className="subject-form"><label className="wide-field">Name<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Robotics Club meeting" /></label><label>Code <small>Optional</small><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ORG" /></label><label>Units <small>Optional</small><input type="number" min="0" step="1" value={units} onChange={(event) => setUnits(event.target.value)} /></label><div className="wide-field subject-look-editor"><IconPicker value={icon} onChange={setIcon} /><ColorPicker value={selectedColor} onChange={setSelectedColor} /></div><div className="wide-field meeting-editors">{meetings.map((meeting, meetingIndex) => <section className="meeting-editor" key={meetingIndex}><header><strong>Meeting {meetingIndex + 1}</strong>{meetings.length > 1 && <button type="button" onClick={() => setMeetings((current) => current.filter((_, index) => index !== meetingIndex))}>Remove</button>}</header><div className="day-picker"><span>Days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={meeting.days.includes(day.code) ? "selected" : ""} onClick={() => toggleDay(meetingIndex, day.code)}>{day.short}</button>)}</div></div><div className="meeting-fields"><label>Starts<input type="time" value={meeting.start} onChange={(event) => updateMeeting(meetingIndex, "start", event.target.value)} /></label><label>Ends<input type="time" value={meeting.end} onChange={(event) => updateMeeting(meetingIndex, "end", event.target.value)} /></label><label>Room or place <small>Optional</small><input value={meeting.room === "TBA" ? "" : meeting.room} onChange={(event) => updateMeeting(meetingIndex, "room", event.target.value)} placeholder="e.g. Library" /></label></div></section>)}<button type="button" className="add-meeting-button" onClick={() => setMeetings((current) => [...current, { days: ["MO"], start: "08:00", end: "09:00", room: "TBA" }])}>+ Add another meeting</button></div></div>{error && <p className="form-error">{error}</p>}<button className="sky-button wide-dialog" onClick={submit}>{initial ? "Save changes" : "Add to my schedule"}</button></div></div>;
 }
 
 function ReportDialog({ onClose }: { onClose: () => void }) {
