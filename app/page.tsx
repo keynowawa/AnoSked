@@ -22,6 +22,7 @@ type Subject = {
   color: string;
   icon?: IconName;
   meeting: Meeting;
+  meetings?: Meeting[];
 };
 
 type Task = {
@@ -55,7 +56,7 @@ type SkedData = {
 };
 
 type ParseIssue = {
-  kind: "empty" | "fees-only" | "missing-table" | "empty-table" | "incomplete";
+  kind: "empty" | "fees-only" | "missing-table" | "empty-table" | "incomplete" | "timetable-grid" | "file";
   title: string;
   detail: string;
 };
@@ -80,6 +81,7 @@ type InstallPromptEvent = Event & {
 type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "share" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "calculator" | "globe" | "backup" | "profile" | "trash" | "sound" | "edit";
 
 const STORAGE_KEY = "anosked.local.v1";
+const TIMETABLE_GRID_DETAIL = "This looks like text copied from a timetable image or PDF. Its rows and columns were lost, so AnoSked can’t safely match subjects with their times and rooms. Upload the original timetable when supported, paste a line-by-line subject list, or add each class manually.";
 const SHARE_URL = "https://anosked.vercel.app";
 const SHARE_MESSAGE = `Meet AnoSked? 📅
 
@@ -135,13 +137,14 @@ function isValidStoredData(value: unknown): value is SkedData {
   const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
   const validSubjects = value.subjects.every((subject) => {
     if (!isRecord(subject) || !isRecord(subject.meeting)) return false;
-    const meeting = subject.meeting;
-    return isShortString(subject.id, 100) && isShortString(subject.code, 50) && isShortString(subject.title, 300)
-      && isShortString(subject.color, 30) && typeof subject.units === "number" && Number.isFinite(subject.units)
-      && subject.units >= 0 && subject.units <= 20 && Array.isArray(meeting.days) && meeting.days.length > 0
+    const meetings = Array.isArray(subject.meetings) && subject.meetings.length ? subject.meetings : [subject.meeting];
+    const validMeetings = meetings.length <= 14 && meetings.every((meeting) => isRecord(meeting) && Array.isArray(meeting.days) && meeting.days.length > 0
       && meeting.days.length <= 7 && meeting.days.every((day) => typeof day === "string" && validDays.has(day as DayCode))
       && isShortString(meeting.start, 5) && timePattern.test(meeting.start) && isShortString(meeting.end, 5)
-      && timePattern.test(meeting.end) && meeting.end > meeting.start && isShortString(meeting.room, 150);
+      && timePattern.test(meeting.end) && meeting.end > meeting.start && isShortString(meeting.room, 150));
+    return isShortString(subject.id, 100) && isShortString(subject.code, 50) && isShortString(subject.title, 300)
+      && isShortString(subject.color, 30) && typeof subject.units === "number" && Number.isFinite(subject.units)
+      && subject.units >= 0 && subject.units <= 20 && validMeetings;
   });
   if (!validSubjects) return false;
   const subjectIds = new Set(value.subjects.map((subject) => subject.id));
@@ -202,6 +205,94 @@ function decodeDays(raw: string): DayCode[] {
   return [...new Set(result)];
 }
 
+function looksLikeTimetableGrid(text: string) {
+  const dayCount = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].filter((day) => new RegExp(`\\b${day}\\b`, "i").test(text)).length;
+  const timeCount = text.match(/\b\d{1,2}(?::|\.)\d{2}\s*(?:AM|PM)\b/gi)?.length || 0;
+  return dayCount >= 3 && (timeCount >= 4 || /\b(?:class schedule|timetable|time)\b/i.test(text));
+}
+
+function subjectMeetings(subject: Subject) {
+  return subject.meetings?.length ? subject.meetings : [subject.meeting];
+}
+
+function clockPart(raw: string) {
+  const match = raw.trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  if (hour < 1 || hour > 12 || minute > 59) return null;
+  return { hour, minute, suffix: match[3] || "" };
+}
+
+function flexibleTimeRange(startRaw: string, endRaw: string) {
+  const startPart = clockPart(startRaw);
+  const endPart = clockPart(endRaw);
+  if (!startPart || !endPart) return null;
+  const toMinutes = (part: NonNullable<ReturnType<typeof clockPart>>, suffix = part.suffix) => {
+    let hour = part.hour % 12;
+    if (suffix === "pm") hour += 12;
+    return hour * 60 + part.minute;
+  };
+  let end = toMinutes(endPart);
+  let start: number;
+  if (startPart.suffix) {
+    start = toMinutes(startPart);
+  } else if (endPart.suffix) {
+    const amCandidate = toMinutes(startPart, "am");
+    const pmCandidate = toMinutes(startPart, "pm");
+    start = pmCandidate < end && end - pmCandidate <= 6 * 60 ? pmCandidate : amCandidate;
+  } else {
+    start = toMinutes(startPart, startPart.hour === 12 ? "pm" : "am");
+  }
+  if (!endPart.suffix && end <= start) end += 12 * 60;
+  if (endPart.suffix && end <= start) end += 12 * 60;
+  if (start < 0 || end > 24 * 60 || end - start < 15 || end - start > 12 * 60) return null;
+  const format = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  return { start: format(start), end: format(end) };
+}
+
+function parseFlexibleMeeting(line: string): Meeting | null {
+  const match = line.trim().match(/^([A-Za-z/&]+)\s*(?:-|:)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)(?:\s+(?:(?:room|rm)\s*[:#-]?\s*)?(.+))?$/i);
+  if (!match) return null;
+  const days = decodeDays(match[1]);
+  const times = flexibleTimeRange(match[2], match[3]);
+  if (!days.length || !times) return null;
+  const roomMatch = (match[4] || "").match(/^(?:(?:room|rm)\s*[:#-]?\s*)?(.+)$/i);
+  return { days, ...times, room: roomMatch?.[1]?.trim() || "TBA" };
+}
+
+function parseFlexibleSubjectList(lines: string[]): ParseResult | null {
+  const subjects: Subject[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const code = lines[index].replace(/\s+/g, " ").trim();
+    const meetingOnNextLine = parseFlexibleMeeting(lines[index + 1] || "");
+    const title = meetingOnNextLine ? code : (lines[index + 1] || "").replace(/\s+/g, " ").trim();
+    let cursor = meetingOnNextLine ? index + 1 : index + 2;
+    const meetings: Meeting[] = [];
+    while (cursor < lines.length) {
+      const meeting = parseFlexibleMeeting(lines[cursor]);
+      if (!meeting) break;
+      meetings.push(meeting);
+      cursor += 1;
+    }
+    if (!meetings.length || !code || !title || code.length > 60 || title.length > 300) continue;
+    subjects.push({
+      id: uid("sub"),
+      code: code.toUpperCase(),
+      title,
+      units: 0,
+      color: COLORS[subjects.length % COLORS.length],
+      meeting: meetings[0],
+      meetings,
+    });
+    index = cursor - 1;
+  }
+  if (!subjects.length) return null;
+  const semester = lines.find((line) => /(?:semester|term).*\d{4}\s*[-–]\s*\d{4}/i.test(line)) || "";
+  const block = lines.find((line) => /^(?:section|block)\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
+  return { semester, block, totalUnits: 0, program: "", yearLevel: "", subjects, warnings: ["Units were not included in this schedule and were saved as 0. Review every class before saving."] };
+}
+
 function parseEnrollment(text: string): { result?: ParseResult; issue?: ParseIssue } {
   const cleaned = text.replace(/\r/g, "").replace(/\u00a0/g, " ").trim();
   if (!cleaned) {
@@ -215,6 +306,11 @@ function parseEnrollment(text: string): { result?: ParseResult; issue?: ParseIss
 
   const firstSubjectIndex = lines.findIndex((line) => /^[A-Z]{2,}\s?\d{2,}[A-Z]?\s*:\s*.+/i.test(line));
   if (firstSubjectIndex < 0) {
+    const flexibleResult = parseFlexibleSubjectList(lines);
+    if (flexibleResult) return { result: flexibleResult };
+    if (looksLikeTimetableGrid(cleaned)) {
+      return { issue: { kind: "timetable-grid", title: "This timetable needs its original layout", detail: TIMETABLE_GRID_DETAIL } };
+    }
     if (/assessment of fees|tuition fee|total due|schedule of payment/i.test(lower)) {
       return { issue: { kind: "fees-only", title: "This is the fees section", detail: "Copy the enrolled-subjects table instead. It should contain subject codes followed by class days, time, and room." } };
     }
@@ -263,6 +359,11 @@ function parseEnrollment(text: string): { result?: ParseResult; issue?: ParseIss
   }
 
   if (!subjects.length) {
+    const flexibleResult = parseFlexibleSubjectList(lines);
+    if (flexibleResult) return { result: flexibleResult };
+    if (looksLikeTimetableGrid(cleaned)) {
+      return { issue: { kind: "timetable-grid", title: "This timetable needs its original layout", detail: TIMETABLE_GRID_DETAIL } };
+    }
     return { issue: { kind: "empty-table", title: "We found the table, but no complete subjects", detail: "Make sure each subject includes its code, class days, start and end time, room, and units." } };
   }
 
@@ -273,6 +374,92 @@ function parseEnrollment(text: string): { result?: ParseResult; issue?: ParseIss
   if (!semester) warnings.push("The semester label was not found. You can add it before saving.");
 
   return { result: { semester, block, totalUnits: declaredUnits || parsedUnits, program, yearLevel, subjects, warnings } };
+}
+
+async function createLocalOcrWorker(onProgress: (message: string) => void) {
+  const { createWorker } = await import("tesseract.js");
+  return createWorker("eng", 1, {
+    workerPath: "/ocr/worker.min.js",
+    corePath: "/ocr/core",
+    langPath: "/ocr",
+    logger: (event) => {
+      if (event.status === "recognizing text") onProgress(`Reading timetable… ${Math.round((event.progress || 0) * 100)}%`);
+    },
+  });
+}
+
+async function extractScheduleFile(file: File, onProgress: (message: string) => void) {
+  if (file.type.startsWith("image/")) {
+    onProgress("Preparing the photo…");
+    const worker = await createLocalOcrWorker(onProgress);
+    try {
+      const result = await worker.recognize(file);
+      return result.data.text.trim();
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+    throw new Error("Choose a JPG, PNG, HEIC, WEBP, or PDF file.");
+  }
+
+  onProgress("Reading the PDF…");
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+  const pdf = await loadingTask.promise;
+  if (pdf.numPages > 8) {
+    await loadingTask.destroy();
+    throw new Error("Choose a timetable PDF with 8 pages or fewer.");
+  }
+
+  try {
+    const pageLines: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      onProgress(`Reading PDF page ${pageNumber} of ${pdf.numPages}…`);
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const entries = content.items.flatMap((item) => {
+        if (!("str" in item) || !item.str.trim()) return [];
+        return [{ text: item.str.trim(), x: item.transform[4], y: item.transform[5] }];
+      }).sort((a, b) => Math.abs(b.y - a.y) > 3 ? b.y - a.y : a.x - b.x);
+      const rows: Array<{ y: number; cells: Array<{ x: number; text: string }> }> = [];
+      entries.forEach((entry) => {
+        const row = rows.find((candidate) => Math.abs(candidate.y - entry.y) <= 3);
+        if (row) row.cells.push({ x: entry.x, text: entry.text });
+        else rows.push({ y: entry.y, cells: [{ x: entry.x, text: entry.text }] });
+      });
+      pageLines.push(rows.sort((a, b) => b.y - a.y).map((row) => row.cells.sort((a, b) => a.x - b.x).map((cell) => cell.text).join(" ")).join("\n"));
+    }
+
+    const embeddedText = pageLines.join("\n").trim();
+    if (embeddedText.length >= 60) return embeddedText;
+
+    onProgress("This PDF is scanned. Reading it as an image…");
+    const worker = await createLocalOcrWorker(onProgress);
+    try {
+      const scannedPages: string[] = [];
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1.6 });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        const context = canvas.getContext("2d", { alpha: false });
+        if (!context) throw new Error("This browser could not prepare the PDF page.");
+        await page.render({ canvas, canvasContext: context, viewport }).promise;
+        onProgress(`Reading scanned page ${pageNumber} of ${pdf.numPages}…`);
+        const result = await worker.recognize(canvas);
+        scannedPages.push(result.data.text.trim());
+      }
+      return scannedPages.join("\n").trim();
+    } finally {
+      await worker.terminate();
+    }
+  } finally {
+    await loadingTask.destroy();
+  }
 }
 
 function formatTime(value: string) {
@@ -331,14 +518,18 @@ function getSelectedDay(date: Date): DayCode {
 }
 
 function nextClassDate(subject: Subject, after = new Date()) {
-  const [hour, minute] = subject.meeting.start.split(":").map(Number);
-  for (let offset = 0; offset <= 14; offset += 1) {
-    const candidate = new Date(after);
-    candidate.setDate(after.getDate() + offset);
-    candidate.setHours(hour, minute, 0, 0);
-    if (subject.meeting.days.includes(getSelectedDay(candidate)) && candidate > after) return candidate;
-  }
-  return null;
+  const candidates = subjectMeetings(subject).flatMap((meeting) => {
+    const [hour, minute] = meeting.start.split(":").map(Number);
+    const dates: Date[] = [];
+    for (let offset = 0; offset <= 14; offset += 1) {
+      const candidate = new Date(after);
+      candidate.setDate(after.getDate() + offset);
+      candidate.setHours(hour, minute, 0, 0);
+      if (meeting.days.includes(getSelectedDay(candidate)) && candidate > after) dates.push(candidate);
+    }
+    return dates;
+  });
+  return candidates.sort((a, b) => a.getTime() - b.getTime())[0] || null;
 }
 
 function escapeICS(value: string) {
@@ -421,6 +612,8 @@ export default function Home() {
   const [stage, setStage] = useState<"paste" | "review">("paste");
   const [paste, setPaste] = useState("");
   const [issue, setIssue] = useState<ParseIssue | null>(null);
+  const [importingFile, setImportingFile] = useState(false);
+  const [fileImportStatus, setFileImportStatus] = useState("");
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [profile, setProfile] = useState<Profile>({ nickname: "", program: "", yearLevel: "" });
   const [termStart, setTermStart] = useState("");
@@ -447,6 +640,7 @@ export default function Home() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const scheduleFileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     window.queueMicrotask(() => {
@@ -509,7 +703,7 @@ export default function Home() {
   const daySubjects = useMemo(() => {
     if (!data || selectedOutsideTerm) return [];
     return data.subjects
-      .filter((subject) => subject.meeting.days.includes(dayCode))
+      .flatMap((subject) => subjectMeetings(subject).filter((meeting) => meeting.days.includes(dayCode)).map((meeting) => ({ subject, meeting })))
       .sort((a, b) => a.meeting.start.localeCompare(b.meeting.start));
   }, [data, dayCode, selectedOutsideTerm]);
 
@@ -531,7 +725,7 @@ export default function Home() {
     const [startHour, startMinute] = subject.meeting.start.split(":").map(Number);
     return startHour * 60 + startMinute > clockMinutes;
   }) : firstDaySubject;
-  const highlightedSubjectId = activeDaySubject?.id || nextDaySubject?.id;
+  const highlightedSubjectId = activeDaySubject?.subject.id || nextDaySubject?.subject.id;
   const openTasks = data?.tasks.filter((task) => !task.done) || [];
   const overdueTasks = openTasks.filter((task) => new Date(task.dueAt).getTime() < clock.getTime());
   const dashboardTasks = selectedIsToday
@@ -545,7 +739,7 @@ export default function Home() {
     : selectedBeforeTerm
       ? "This date falls before the saved semester begins."
       : firstDaySubject
-    ? `${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}${selectedIsToday ? " today" : " scheduled"}. First: ${compactTitle(firstDaySubject.title)} at ${formatTime(firstDaySubject.meeting.start).replace(":00", "")} · ${firstDaySubject.meeting.room}.`
+    ? `${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}${selectedIsToday ? " today" : " scheduled"}. First: ${compactTitle(firstDaySubject.subject.title)} at ${formatTime(firstDaySubject.meeting.start).replace(":00", "")} · ${firstDaySubject.meeting.room}.`
     : selectedIsToday
       ? "No classes today. Your schedule is clear."
       : "No classes scheduled. Your day is open.";
@@ -562,8 +756,8 @@ export default function Home() {
         ? "Take it easy. Swipe to another day when you want to check the rest of your week."
         : `Nothing is scheduled for ${selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}. Swipe to check another day.`;
 
-  function runParser() {
-    const response = parseEnrollment(paste);
+  function prepareScheduleText(text: string) {
+    const response = parseEnrollment(text);
     if (response.issue) {
       setIssue(response.issue);
       setParsed(null);
@@ -581,6 +775,51 @@ export default function Home() {
       setStage("review");
       playFeedbackTone();
     }
+  }
+
+  function runParser() {
+    prepareScheduleText(paste);
+  }
+
+  async function importScheduleFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      setIssue({ kind: "file", title: "That file is too large", detail: "Choose a photo or PDF smaller than 20 MB." });
+      return;
+    }
+    setIssue(null);
+    setImportingFile(true);
+    setFileImportStatus("Opening the file…");
+    try {
+      const extracted = await extractScheduleFile(file, setFileImportStatus);
+      if (!extracted.trim()) {
+        setIssue({ kind: "file", title: "No readable text was found", detail: "Try a clearer, straight-on photo with the entire timetable visible, or use a PDF with selectable text." });
+        return;
+      }
+      setPaste(extracted);
+      prepareScheduleText(extracted);
+    } catch (error) {
+      setIssue({ kind: "file", title: "AnoSked couldn’t read that file", detail: error instanceof Error ? error.message : "Try another photo or PDF, or paste the subject list instead." });
+    } finally {
+      setImportingFile(false);
+      setFileImportStatus("");
+    }
+  }
+
+  function startManualSchedule() {
+    setIssue(null);
+    setParsed({ semester: "", block: "", totalUnits: 0, program: "", yearLevel: "", subjects: [], warnings: ["Add each class below, then confirm your semester dates."] });
+    setProfile({ nickname: "", program: "", yearLevel: "" });
+    setTermStart("");
+    setTermEnd("");
+    setStage("review");
+  }
+
+  function addParsedSubject(subject: Subject) {
+    setParsed((current) => current ? { ...current, subjects: [...current.subjects, subject], totalUnits: current.totalUnits + subject.units } : current);
+    setShowSubjectForm(false);
   }
 
   async function requestInstall() {
@@ -666,18 +905,21 @@ export default function Home() {
     setParsed({ ...parsed, subjects, totalUnits: subjects.reduce((sum, subject) => sum + subject.units, 0) });
   }
 
-  function updateParsedSubject(id: string, field: "code" | "title" | "room" | "start" | "end", value: string) {
+  function updateParsedSubject(id: string, field: "code" | "title", value: string) {
     if (!parsed) return;
     setParsed({
       ...parsed,
-      subjects: parsed.subjects.map((subject) => {
-        if (subject.id !== id) return subject;
-        if (field === "room" || field === "start" || field === "end") {
-          return { ...subject, meeting: { ...subject.meeting, [field]: value } };
-        }
-        return { ...subject, [field]: value };
-      }),
+      subjects: parsed.subjects.map((subject) => subject.id === id ? { ...subject, [field]: value } : subject),
     });
+  }
+
+  function updateParsedMeeting(id: string, meetingIndex: number, field: "room" | "start" | "end", value: string) {
+    if (!parsed) return;
+    setParsed({ ...parsed, subjects: parsed.subjects.map((subject) => {
+      if (subject.id !== id) return subject;
+      const meetings = subjectMeetings(subject).map((meeting, index) => index === meetingIndex ? { ...meeting, [field]: value } : meeting);
+      return { ...subject, meeting: meetings[0], meetings };
+    }) });
   }
 
   function updateParsedSubjectIcon(id: string, icon: IconName) {
@@ -795,31 +1037,31 @@ export default function Home() {
     if (!data) return;
     const dayCodeMap: Record<DayCode, string> = { MO: "MO", TU: "TU", WE: "WE", TH: "TH", FR: "FR", SA: "SA", SU: "SU" };
     const until = data.termEnd.replace(/-/g, "") + "T235959";
-    const events = data.subjects.map((subject) => {
+    const events = data.subjects.flatMap((subject) => subjectMeetings(subject).map((meeting, meetingIndex) => {
       const startBase = new Date(`${data.termStart}T00:00:00`);
       let first: Date | null = null;
       for (let offset = 0; offset < 7; offset += 1) {
         const candidate = new Date(startBase);
         candidate.setDate(startBase.getDate() + offset);
-        if (subject.meeting.days.includes(getSelectedDay(candidate))) { first = candidate; break; }
+        if (meeting.days.includes(getSelectedDay(candidate))) { first = candidate; break; }
       }
       if (!first) return "";
       const compact = dateKey(first).replace(/-/g, "");
-      const start = subject.meeting.start.replace(":", "") + "00";
-      const end = subject.meeting.end.replace(":", "") + "00";
+      const start = meeting.start.replace(":", "") + "00";
+      const end = meeting.end.replace(":", "") + "00";
       return [
         "BEGIN:VEVENT",
-        `UID:${subject.id}@anosked.local`,
+        `UID:${subject.id}-${meetingIndex}@anosked.local`,
         `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`,
         `DTSTART:${compact}T${start}`,
         `DTEND:${compact}T${end}`,
-        `RRULE:FREQ=WEEKLY;BYDAY=${subject.meeting.days.map((day) => dayCodeMap[day]).join(",")};UNTIL=${until}`,
+        `RRULE:FREQ=WEEKLY;BYDAY=${meeting.days.map((day) => dayCodeMap[day]).join(",")};UNTIL=${until}`,
         `SUMMARY:${escapeICS(`${subject.title} · ${subject.code}`)}`,
-        `LOCATION:${escapeICS(subject.meeting.room)}`,
+        `LOCATION:${escapeICS(meeting.room)}`,
         "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT15M", `DESCRIPTION:${escapeICS(`${subject.code} starts in 15 minutes`)}`, "END:VALARM",
         "END:VEVENT",
       ].join("\r\n");
-    }).join("\r\n");
+    })).join("\r\n");
     const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//AnoSked//Local Student Calendar//EN", "CALSCALE:GREGORIAN", events, "END:VCALENDAR"].join("\r\n");
     const filename = `AnoSked-${data.semester.replace(/\s+/g, "-")}.ics`;
     const result = await shareOrDownload(new Blob([ics], { type: "text/calendar;charset=utf-8" }), filename, "Add AnoSked? to your calendar");
@@ -842,9 +1084,10 @@ export default function Home() {
     const top = mode === "wallpaper" ? 880 : 210;
     const bottom = mode === "wallpaper" ? 180 : 90;
     const timeWidth = mode === "wallpaper" ? 78 : 105;
-    const days = DAY_META.filter((day) => data.subjects.some((subject) => subject.meeting.days.includes(day.code)));
-    const starts = data.subjects.map((subject) => { const [hour, minute] = subject.meeting.start.split(":").map(Number); return hour * 60 + minute; });
-    const ends = data.subjects.map((subject) => { const [hour, minute] = subject.meeting.end.split(":").map(Number); return hour * 60 + minute; });
+    const scheduleEntries = data.subjects.flatMap((subject) => subjectMeetings(subject).map((meeting) => ({ subject, meeting })));
+    const days = DAY_META.filter((day) => scheduleEntries.some(({ meeting }) => meeting.days.includes(day.code)));
+    const starts = scheduleEntries.map(({ meeting }) => { const [hour, minute] = meeting.start.split(":").map(Number); return hour * 60 + minute; });
+    const ends = scheduleEntries.map(({ meeting }) => { const [hour, minute] = meeting.end.split(":").map(Number); return hour * 60 + minute; });
     const firstHour = Math.floor(Math.min(...starts) / 60);
     const lastHour = Math.ceil(Math.max(...ends) / 60);
     const hourSpan = Math.max(1, lastHour - firstHour);
@@ -899,11 +1142,11 @@ export default function Home() {
       }
     }
 
-    data.subjects.forEach((subject) => subject.meeting.days.forEach((day) => {
+    scheduleEntries.forEach(({ subject, meeting }) => meeting.days.forEach((day) => {
       const dayIndex = days.findIndex((item) => item.code === day);
       if (dayIndex < 0) return;
-      const [startHour, startMinute] = subject.meeting.start.split(":").map(Number);
-      const [endHour, endMinute] = subject.meeting.end.split(":").map(Number);
+      const [startHour, startMinute] = meeting.start.split(":").map(Number);
+      const [endHour, endMinute] = meeting.end.split(":").map(Number);
       const startOffset = startHour + startMinute / 60 - firstHour;
       const duration = endHour + endMinute / 60 - (startHour + startMinute / 60);
       const x = gridLeft + dayIndex * dayWidth + 4;
@@ -921,7 +1164,7 @@ export default function Home() {
       if (blockHeight > 54) {
         ctx.fillStyle = "rgba(255,255,255,.84)";
         ctx.font = `600 ${mode === "wallpaper" ? 11 : 15}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.fillText(`${subject.code} · ${subject.meeting.room}`, x + 10, y + 43, blockWidth - 18);
+        ctx.fillText(`${subject.code} · ${meeting.room}`, x + 10, y + 43, blockWidth - 18);
       }
     }));
 
@@ -977,23 +1220,28 @@ export default function Home() {
                   <div><h2>Paste your subjects</h2><p>We’ll find the subject names, rooms, days, and times.</p></div>
                 </div>
                 <textarea value={paste} onChange={(event) => { setPaste(event.target.value); setIssue(null); }} placeholder="Paste your enrolled subjects here…" aria-label="Subject enlistment text" />
+                <div className="schedule-file-import">
+                  <input ref={scheduleFileInput} type="file" accept="image/*,application/pdf,.pdf" onChange={importScheduleFile} hidden />
+                  <button className="file-import-button" onClick={() => scheduleFileInput.current?.click()} disabled={importingFile}><Icon name="image" size={17} /><span><strong>{importingFile ? fileImportStatus || "Reading your timetable…" : "Add a photo or PDF"}</strong><small>Read locally on your device · 20 MB maximum</small></span></button>
+                  <button className="manual-import-button" onClick={startManualSchedule} disabled={importingFile}>Enter classes manually</button>
+                </div>
                 {issue && (
                   <div className="error-panel" role="alert">
                     <img src="/assets/thinking.png" alt="" />
-                    <div><strong>{issue.title}</strong><p>{issue.detail}</p><button className="text-button" onClick={() => setPaste(SAMPLE)}>Load an example</button></div>
+                    <div><strong>{issue.title}</strong><p>{issue.detail}</p><div className="error-actions"><button className="text-button" onClick={() => setPaste(SAMPLE)}>Load an example</button>{(issue.kind === "timetable-grid" || issue.kind === "file") && <button className="text-button" onClick={startManualSchedule}>Add classes manually</button>}</div></div>
                   </div>
                 )}
                 <div className="paste-actions">
                   <button className="secondary-button" onClick={() => { setPaste(SAMPLE); setIssue(null); }}>Try sample</button>
                   <button className="primary-button" onClick={runParser}>Continue</button>
                 </div>
-                <p className="one-line-privacy">Processed privately on your device. AnoSked does not send your enrollment text anywhere, and student numbers are ignored.</p>
+                <p className="one-line-privacy">Text, photos, and PDFs are read privately on your device. AnoSked does not upload them, and student numbers are ignored.</p>
               </>
             ) : parsed ? (
               <>
                 <div className="card-heading">
                   <button className="back-button" onClick={() => setStage("paste")} aria-label="Go back">←</button>
-                  <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects · {parsed.totalUnits} units found</p></div>
+                  <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects · {parsed.totalUnits} units found</p></div><button className="review-add-class" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={14} /> Add class</button>
                 </div>
                 {parsed.warnings.map((warning) => <div className="warning-strip" key={warning}>! {warning}</div>)}
                 <div className="review-list">
@@ -1001,7 +1249,7 @@ export default function Home() {
                     <div className="review-subject" key={subject.id}>
                       <div className="review-fields">
                         <div className="inline-fields"><label className="subject-code-input"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><i style={{ background: subject.color }} /></label><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
-                        <div className="schedule-edit"><span className="meeting-days">{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={subject.meeting.start} onChange={(e) => updateParsedSubject(subject.id, "start", e.target.value)} aria-label="Start time" /></label><label>Ends<input type="time" value={subject.meeting.end} onChange={(e) => updateParsedSubject(subject.id, "end", e.target.value)} aria-label="End time" /></label><label>Room<input value={subject.meeting.room} onChange={(e) => updateParsedSubject(subject.id, "room", e.target.value)} aria-label="Room" /></label></div>
+                        <div className="review-meetings">{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="schedule-edit" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><span className="meeting-days">{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={meeting.start} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "start", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} start time`} /></label><label>Ends<input type="time" value={meeting.end} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "end", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} end time`} /></label><label>Room<input value={meeting.room} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "room", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} room`} /></label></div>)}</div>
                         <details className="review-customize"><summary><span>Customize</span><span className="review-look-preview"><Icon name={subject.icon || subjectIcon(subject)} size={14} /><i style={{ background: subject.color }} /><b>›</b></span></summary><div className="review-customize-panel"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div></details>
                       </div>
                       <button className="remove-button" onClick={() => removeParsedSubject(subject.id)} aria-label={`Remove ${subject.code}`}>×</button>
@@ -1009,7 +1257,8 @@ export default function Home() {
                   ))}
                 </div>
                 <div className="review-section">
-                  <h3>Confirm the semester dates</h3><p>These dates aren’t included in the enlistment page.</p>
+                  <h3>Confirm the semester</h3><p>Add anything the imported schedule did not include.</p>
+                  <div className="term-fields"><label>Term or semester<input value={parsed.semester} onChange={(event) => setParsed({ ...parsed, semester: event.target.value })} placeholder="e.g. 1st Term 2026–2027" /></label><label>Section or block <small>Optional</small><input value={parsed.block} onChange={(event) => setParsed({ ...parsed, block: event.target.value })} placeholder="e.g. 4CSD" /></label></div>
                   <div className="date-fields"><label>Classes start<input type="date" value={termStart} onChange={(e) => setTermStart(e.target.value)} /></label><label>Classes end<input type="date" value={termEnd} onChange={(e) => setTermEnd(e.target.value)} /></label></div>
                 </div>
                 <details className="optional-profile">
@@ -1024,6 +1273,7 @@ export default function Home() {
         </section>
         <footer className="public-footer"><span>© 2026 AnoSked? · Created by Kyann Tagle</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button><button onClick={() => setShowInstallGuide(true)}>Install help</button></nav></footer>
         {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
+        {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onAdd={addParsedSubject} color={COLORS[(parsed?.subjects.length || 0) % COLORS.length]} />}
         {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
         {notice && <BrandedToast message={notice} />}
       </main>
@@ -1059,19 +1309,19 @@ export default function Home() {
             <div className="today-layout">
               <div className="timeline-card">
                 <div className="section-heading"><h2>Timeline</h2><span>{DAY_META.find((day) => day.code === dayCode)?.label}</span></div>
-                {!daySubjects.length ? <EmptyState title={emptyTimelineTitle} detail={emptyTimelineDetail} /> : daySubjects.map((subject) => {
+                {!daySubjects.length ? <EmptyState title={emptyTimelineTitle} detail={emptyTimelineDetail} /> : daySubjects.map(({ subject, meeting }) => {
                   const now = clock;
                   const isToday = dateKey(now) === dateKey(selectedDate);
                   const currentMinutes = now.getHours() * 60 + now.getMinutes();
-                  const [sh, sm] = subject.meeting.start.split(":").map(Number);
-                  const [eh, em] = subject.meeting.end.split(":").map(Number);
+                  const [sh, sm] = meeting.start.split(":").map(Number);
+                  const [eh, em] = meeting.end.split(":").map(Number);
                   const active = isToday && currentMinutes >= sh * 60 + sm && currentMinutes < eh * 60 + em;
                   const linked = todayTasks.filter((task) => task.subjectId === subject.id);
                   const featured = highlightedSubjectId === subject.id;
-                  return <div className={`timeline-event ${active ? "is-active" : ""} ${featured ? "is-featured" : ""}`} key={subject.id}>
-                    <div className="timeline-time"><strong>{formatTime(subject.meeting.start)}</strong><span>{formatTime(subject.meeting.end)}</span></div>
+                  return <div className={`timeline-event ${active ? "is-active" : ""} ${featured ? "is-featured" : ""}`} key={`${subject.id}-${meeting.days.join("")}-${meeting.start}`}>
+                    <div className="timeline-time"><strong>{formatTime(meeting.start)}</strong><span>{formatTime(meeting.end)}</span></div>
                     <div className="event-line"><i style={{ background: subject.color }} /></div>
-                    <div className="event-content"><div className="event-top"><div><h3>{subject.title}</h3><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span></div>{featured ? <span className="now-pill">{active ? "Now" : selectedIsToday ? "Up next" : "First"}</span> : null}</div><p className="event-meta"><b>{subject.meeting.room}</b><span>·</span>{subject.units} units</p>
+                    <div className="event-content"><div className="event-top"><div><h3>{subject.title}</h3><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span></div>{featured ? <span className="now-pill">{active ? "Now" : selectedIsToday ? "Up next" : "First"}</span> : null}</div><p className="event-meta"><b>{meeting.room}</b>{subject.units > 0 && <><span>·</span>{subject.units} units</>}</p>
                       {linked.map((task) => <button className={`inline-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span className="task-check">{task.done ? "✓" : ""}</span><b>{task.title}</b></button>)}
                     </div>
                   </div>;
@@ -1103,11 +1353,11 @@ export default function Home() {
                 <DayStrip selectedDate={selectedDate} onSelect={selectDate} />
                 <div className="day-calendar">
                   <div className="day-calendar-heading"><strong>{DAY_META.find((day) => day.code === dayCode)?.label}</strong><span>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</span></div>
-                  {daySubjects.length ? daySubjects.map((subject) => (
-                    <div className="day-class" key={subject.id}>
-                      <div className="day-class-time"><strong>{formatTime(subject.meeting.start)}</strong><span>{formatTime(subject.meeting.end)}</span></div>
+                  {daySubjects.length ? daySubjects.map(({ subject, meeting }) => (
+                    <div className="day-class" key={`${subject.id}-${meeting.days.join("")}-${meeting.start}`}>
+                      <div className="day-class-time"><strong>{formatTime(meeting.start)}</strong><span>{formatTime(meeting.end)}</span></div>
                       <div className="day-class-card" style={{ background: subject.color }}>
-                        <div><strong>{subject.title}</strong><span>{subject.code}</span></div><b>{subject.meeting.room}</b>
+                        <div><strong>{subject.title}</strong><span>{subject.code}</span></div><b>{meeting.room}</b>
                       </div>
                     </div>
                   )) : <EmptyState title="No classes" detail="Nothing scheduled for this day." />}
@@ -1137,7 +1387,7 @@ export default function Home() {
         {view === "subjects" && (
           <div className="page subjects-page">
             <div className="page-title-row"><div><h1>Subjects</h1><p>{data.subjects.length} subjects · {data.totalUnits} units · Rooms and schedules in one place.</p></div><button className="sky-button icon-button" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={16} /> Add class or activity</button></div>
-            <div className="subject-grid">{data.subjects.map((subject) => <article className="subject-card" key={subject.id}><div className="subject-card-top"><span className="subject-bubble" style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={21} /></span><span className="unit-pill">{subject.units} units</span></div><h2>{subject.title}</h2><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span><div className="subject-detail"><span>{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><strong>{formatTime(subject.meeting.start)}–{formatTime(subject.meeting.end)}</strong></div><div className="subject-room"><span>Room</span><strong>{subject.meeting.room}</strong></div><div className="subject-task-count">{data.tasks.filter((task) => task.subjectId === subject.id && !task.done).length} open tasks</div></article>)}</div>
+            <div className="subject-grid">{data.subjects.map((subject) => <article className="subject-card" key={subject.id}><div className="subject-card-top"><span className="subject-bubble" style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={21} /></span><span className="unit-pill">{subject.units > 0 ? `${subject.units} units` : "Units not listed"}</span></div><h2>{subject.title}</h2><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span>{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="subject-meeting" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><div className="subject-detail"><span>{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><strong>{formatTime(meeting.start)}–{formatTime(meeting.end)}</strong></div><div className="subject-room"><span>Room</span><strong>{meeting.room}</strong></div></div>)}<div className="subject-task-count">{data.tasks.filter((task) => task.subjectId === subject.id && !task.done).length} open tasks</div></article>)}</div>
           </div>
         )}
 
@@ -1231,9 +1481,9 @@ function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
   const lastHour = 22;
   const hours = Array.from({ length: lastHour - firstHour + 1 }, (_, index) => firstHour + index);
   const totalMinutes = (lastHour - firstHour) * 60;
-  const events = subjects.flatMap((subject) => subject.meeting.days.map((day) => ({ subject, day })));
-  const earliest = [...subjects].sort((a, b) => a.meeting.start.localeCompare(b.meeting.start))[0];
-  const jumpKey = earliest ? `${earliest.id}-${earliest.meeting.days[0]}` : "";
+  const events = subjects.flatMap((subject) => subjectMeetings(subject).flatMap((meeting, meetingIndex) => meeting.days.map((day) => ({ subject, meeting, meetingIndex, day }))));
+  const earliest = [...events].sort((a, b) => a.meeting.start.localeCompare(b.meeting.start))[0];
+  const jumpKey = earliest ? `${earliest.subject.id}-${earliest.meetingIndex}-${earliest.day}` : "";
   const earliestHour = earliest ? Number(earliest.meeting.start.split(":")[0]) : 0;
   const shouldShowJump = earliestHour >= 12;
 
@@ -1268,17 +1518,17 @@ function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
           <div className="schedule-grid">
             <div className="day-columns">{DAY_META.map((day) => <i key={day.code} />)}</div>
             <div className="hour-lines">{hours.map((hour) => <i key={hour} style={{ top: `${((hour - firstHour) / (lastHour - firstHour)) * 100}%` }} />)}</div>
-            {events.map(({ subject, day }) => {
+            {events.map(({ subject, meeting, meetingIndex, day }) => {
               const dayIndex = DAY_META.findIndex((item) => item.code === day);
-              const [startHour, startMinute] = subject.meeting.start.split(":").map(Number);
-              const [endHour, endMinute] = subject.meeting.end.split(":").map(Number);
+              const [startHour, startMinute] = meeting.start.split(":").map(Number);
+              const [endHour, endMinute] = meeting.end.split(":").map(Number);
               const start = Math.max(0, startHour * 60 + startMinute - firstHour * 60);
               const end = Math.min(totalMinutes, endHour * 60 + endMinute - firstHour * 60);
               if (end <= 0 || start >= totalMinutes || end <= start) return null;
               return (
                 <div
-                  className={`schedule-block ${`${subject.id}-${day}` === jumpKey ? "jump-target" : ""}`}
-                  key={`${subject.id}-${day}`}
+                  className={`schedule-block ${`${subject.id}-${meetingIndex}-${day}` === jumpKey ? "jump-target" : ""}`}
+                  key={`${subject.id}-${meetingIndex}-${day}`}
                   style={{
                     left: `calc(${dayIndex * (100 / 7)}% + 4px)`,
                     width: `calc(${100 / 7}% - 8px)`,
@@ -1288,8 +1538,8 @@ function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
                   }}
                 >
                   <strong>{subject.title}</strong>
-                  <span>{subject.code} · {subject.meeting.room}</span>
-                  <small>{formatTime(subject.meeting.start).replace(":00", "")}–{formatTime(subject.meeting.end).replace(":00", "")}</small>
+                  <span>{subject.code} · {meeting.room}</span>
+                  <small>{formatTime(meeting.start).replace(":00", "")}–{formatTime(meeting.end).replace(":00", "")}</small>
                 </div>
               );
             })}
@@ -1435,7 +1685,7 @@ function ExportDialog({ onClose, onWallpaper, onImage, onShare }: { onClose: () 
 
 function PolicyDialog({ type, onClose }: { type: "privacy" | "terms"; onClose: () => void }) {
   const privacy = type === "privacy";
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog policy-dialog" role="dialog" aria-modal="true" aria-labelledby="policy-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><h2 id="policy-title">{privacy ? "Privacy Notice" : "Terms of Use"}</h2><p className="policy-date">Effective July 29, 2026</p>{privacy ? <div className="policy-copy"><h3>What stays on your device</h3><p>Enrollment text is processed in your browser. Parsed subjects, tasks, optional profile labels, and your consent record are stored locally in this browser. AnoSked currently has no accounts, creator-accessible database, advertising tracker, or analytics tracker.</p><h3>What is ignored</h3><p>Student numbers, fees, balances, and payment details are not intentionally saved. The original pasted text is discarded after you confirm the parsed schedule.</p><h3>Deletion and exports</h3><p>Clearing browser data or deleting the installed app can remove everything. Backup, image, wallpaper, and calendar files leave AnoSked only when you choose to export them; the destination app then applies its own privacy practices.</p></div> : <div className="policy-copy"><h3>Use of AnoSked</h3><p>AnoSked is a convenience tool for organizing class information. Check important dates, rooms, and schedule changes against your school’s official records.</p><h3>Your responsibility</h3><p>You are responsible for reviewing parsed information, maintaining backups, and deciding what to export. AnoSked is provided as-is and may not recognize every enrollment format.</p><h3>Independence</h3><p>AnoSked is not affiliated with, endorsed by, or an official service of any university.</p></div>}<button className="sky-button wide-dialog" onClick={onClose}>Close</button></div></div>;
+  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog policy-dialog" role="dialog" aria-modal="true" aria-labelledby="policy-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><h2 id="policy-title">{privacy ? "Privacy Notice" : "Terms of Use"}</h2><p className="policy-date">Effective July 29, 2026</p>{privacy ? <div className="policy-copy"><h3>What stays on your device</h3><p>Enrollment text, selected timetable photos, and PDFs are processed inside your browser. Parsed subjects, tasks, optional profile labels, and your consent record are stored locally in this browser. AnoSked currently has no accounts, creator-accessible database, advertising tracker, or analytics tracker.</p><h3>What is ignored</h3><p>Student numbers, fees, balances, and payment details are not intentionally saved. Original pasted text and selected files are discarded after processing; AnoSked stores only the schedule you confirm.</p><h3>Deletion and exports</h3><p>Clearing browser data or deleting the installed app can remove everything. Backup, image, wallpaper, and calendar files leave AnoSked only when you choose to export them; the destination app then applies its own privacy practices.</p></div> : <div className="policy-copy"><h3>Use of AnoSked</h3><p>AnoSked is a convenience tool for organizing class information. Check important dates, rooms, and schedule changes against your school’s official records.</p><h3>Your responsibility</h3><p>You are responsible for reviewing parsed information, maintaining backups, and deciding what to export. AnoSked is provided as-is and may not recognize every enrollment format.</p><h3>Independence</h3><p>AnoSked is not affiliated with, endorsed by, or an official service of any university.</p></div>}<button className="sky-button wide-dialog" onClick={onClose}>Close</button></div></div>;
 }
 
 function ConsentDialog({ onAccept, onPolicy }: { onAccept: () => void; onPolicy: (policy: "privacy" | "terms") => void }) {
