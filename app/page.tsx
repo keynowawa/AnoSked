@@ -481,19 +481,23 @@ export default function Home() {
   }, [data?.tourCompleted]);
 
   const dayCode = getSelectedDay(selectedDate);
+  const selectedDateKey = dateKey(selectedDate);
+  const selectedBeforeTerm = Boolean(data && selectedDateKey < data.termStart);
+  const selectedAfterTerm = Boolean(data && selectedDateKey > data.termEnd);
+  const selectedOutsideTerm = selectedBeforeTerm || selectedAfterTerm;
   const daySubjects = useMemo(() => {
-    if (!data) return [];
+    if (!data || selectedOutsideTerm) return [];
     return data.subjects
       .filter((subject) => subject.meeting.days.includes(dayCode))
       .sort((a, b) => a.meeting.start.localeCompare(b.meeting.start));
-  }, [data, dayCode]);
+  }, [data, dayCode, selectedOutsideTerm]);
 
   const todayTasks = useMemo(() => {
     if (!data) return [];
     const key = dateKey(selectedDate);
     return data.tasks.filter((task) => task.dueAt.slice(0, 10) === key);
   }, [data, selectedDate]);
-  const selectedIsToday = dateKey(selectedDate) === dateKey(clock);
+  const selectedIsToday = selectedDateKey === dateKey(clock);
   const selectedWeekday = selectedDate.toLocaleDateString("en-PH", { weekday: "long" });
   const firstDaySubject = daySubjects[0];
   const clockMinutes = clock.getHours() * 60 + clock.getMinutes();
@@ -509,12 +513,33 @@ export default function Home() {
   const highlightedSubjectId = activeDaySubject?.id || nextDaySubject?.id;
   const openTasks = data?.tasks.filter((task) => !task.done) || [];
   const overdueTasks = openTasks.filter((task) => new Date(task.dueAt).getTime() < clock.getTime());
+  const dashboardTasks = selectedIsToday
+    ? [...overdueTasks, ...todayTasks.filter((task) => !overdueTasks.some((overdue) => overdue.id === task.id))]
+    : todayTasks;
   const semesterEnded = Boolean(data && new Date(`${data.termEnd}T23:59:59`).getTime() < clock.getTime());
-  const dashboardSummary = firstDaySubject
+  const dashboardSummary = selectedAfterTerm
+    ? semesterEnded && selectedIsToday
+      ? `This semester ended on ${new Date(`${data?.termEnd}T12:00:00`).toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })}. Your saved schedule is now inactive.`
+      : "This date falls after the saved semester."
+    : selectedBeforeTerm
+      ? "This date falls before the saved semester begins."
+      : firstDaySubject
     ? `${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}${selectedIsToday ? " today" : " scheduled"}. First: ${compactTitle(firstDaySubject.title)} at ${formatTime(firstDaySubject.meeting.start).replace(":00", "")} · ${firstDaySubject.meeting.room}.`
     : selectedIsToday
       ? "No classes today. Your schedule is clear."
       : "No classes scheduled. Your day is open.";
+  const emptyTimelineTitle = selectedAfterTerm
+    ? semesterEnded && selectedIsToday ? "Semester complete" : "Outside this semester"
+    : selectedBeforeTerm
+      ? "Semester hasn’t started"
+      : selectedIsToday ? "Walang klase today" : `No classes on ${selectedWeekday}`;
+  const emptyTimelineDetail = selectedAfterTerm
+    ? "Old recurring classes are no longer shown as active. Your saved schedule is still available."
+    : selectedBeforeTerm
+      ? `Classes begin on ${new Date(`${data?.termStart}T12:00:00`).toLocaleDateString("en-PH", { month: "long", day: "numeric" })}.`
+      : selectedIsToday
+        ? "Take it easy. Swipe to another day when you want to check the rest of your week."
+        : `Nothing is scheduled for ${selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}. Swipe to check another day.`;
 
   function runParser() {
     const response = parseEnrollment(paste);
@@ -910,7 +935,7 @@ export default function Home() {
                   <button className="secondary-button" onClick={() => { setPaste(SAMPLE); setIssue(null); }}>Try sample</button>
                   <button className="primary-button" onClick={runParser}>Continue</button>
                 </div>
-                <p className="one-line-privacy">Your schedule stays on this device. No account, no upload, and student numbers are ignored.</p>
+                <p className="one-line-privacy">Processed privately on your device. AnoSked does not send your enrollment text anywhere, and student numbers are ignored.</p>
               </>
             ) : parsed ? (
               <>
@@ -967,22 +992,22 @@ export default function Home() {
 
       <section className="app-main">
         <header className="app-header">
-          <div><span className="mobile-wordmark"><img src="/assets/default.png" alt="" />AnoSked?</span><p>{data.semester}{data.block ? ` · ${data.block}` : ""}</p></div>
+          <span className="mobile-wordmark"><img src="/assets/default.png" alt="" />AnoSked?</span>
           <button className="header-icon-button" onClick={() => setView("about")} aria-label="About AnoSked"><Icon name="about" /></button>
         </header>
 
         {view === "today" && (
           <div className="page today-page">
             <div className="page-title-row mascot-title dashboard-title">
-              <div><span className="dashboard-greeting">{greeting(clock)}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `${selectedWeekday} at a glance.`}</h1><p><strong>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</strong> · {dashboardSummary}</p></div>
+              <div><span className="dashboard-term">{data.semester}{data.block ? ` · ${data.block}` : ""}</span><span className="dashboard-greeting">{greeting(clock)}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `${selectedWeekday} at a glance.`}</h1><p><strong>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })}</strong> · {dashboardSummary}</p></div>
               <div className="dashboard-title-side"><img src="/assets/thinking.png" alt="AnoSked thinking" /><button className="date-button" onClick={() => setSelectedDate(new Date())}>Today</button></div>
             </div>
-            {semesterEnded && <div className="semester-banner"><span><Icon name="calendar" size={18} /></span><div><strong>This semester has ended</strong><p>Your schedule stays here until you replace or delete it. Export a backup before starting a new semester.</p></div><button onClick={exportBackup}>Export backup</button></div>}
+            {semesterEnded && <div className="semester-banner"><span><Icon name="calendar" size={18} /></span><div><strong>Semester complete</strong><p>Old recurring classes are inactive. Your schedule and tasks remain on your device until you replace or delete them.</p></div><button onClick={exportBackup}>Export backup</button></div>}
             <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
             <div className="today-layout">
               <div className="timeline-card">
                 <div className="section-heading"><h2>Timeline</h2><span>{DAY_META.find((day) => day.code === dayCode)?.label}</span></div>
-                {!daySubjects.length ? <EmptyState title={selectedIsToday ? "Walang klase today" : `No classes on ${selectedWeekday}`} detail={selectedIsToday ? "Take it easy. Swipe to another day when you want to check the rest of your week." : `Nothing is scheduled for ${selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}. Swipe to check another day.`} /> : daySubjects.map((subject) => {
+                {!daySubjects.length ? <EmptyState title={emptyTimelineTitle} detail={emptyTimelineDetail} /> : daySubjects.map((subject) => {
                   const now = clock;
                   const isToday = dateKey(now) === dateKey(selectedDate);
                   const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -1001,7 +1026,7 @@ export default function Home() {
                 })}
               </div>
               <aside className="today-side">
-                <div className="side-card"><div className="section-heading"><h2>{selectedIsToday ? "Due today" : `Due ${selectedWeekday}`}</h2><button onClick={() => setView("tasks")}>View all</button></div>{todayTasks.length ? todayTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`side-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{subject?.title} · {new Date(task.dueAt).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="All clear" detail={selectedIsToday ? "Nothing is due today." : "Nothing is due on this day."} />}</div>
+                <div className="side-card"><div className="section-heading"><h2>{selectedIsToday && overdueTasks.length ? "Needs attention" : selectedIsToday ? "Due today" : `Due ${selectedWeekday}`}</h2><button onClick={() => setView("tasks")}>View all</button></div>{dashboardTasks.length ? dashboardTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); const overdue = !task.done && new Date(task.dueAt).getTime() < clock.getTime(); return <button className={`side-task ${task.done ? "done" : ""} ${overdue ? "overdue" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{overdue ? "Overdue · " : ""}{subject?.title} · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="All clear" detail={selectedIsToday ? "Nothing is due today." : "Nothing is due on this day."} />}</div>
               </aside>
             </div>
           </div>
@@ -1139,7 +1164,7 @@ export default function Home() {
       {showReport && <ReportDialog onClose={() => setShowReport(false)} />}
       {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
       {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
-      {showTour && <WelcomeTour onClose={() => { setShowTour(false); setData({ ...data, tourCompleted: true }); }} onNavigate={(nextView) => setView(nextView)} />}
+      {showTour && <WelcomeTour onClose={() => { setShowTour(false); setData({ ...data, tourCompleted: true }); }} onNavigate={(nextView) => { setView(nextView); if (nextView === "today") setSelectedDate(new Date()); }} />}
       {!data.consent && <ConsentDialog onAccept={() => setData({ ...data, consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" } })} onPolicy={setPolicy} />}
       {notice && <BrandedToast message={notice} />}
     </main>
