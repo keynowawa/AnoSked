@@ -7,7 +7,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") || requestHeaders.get("host") || "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "AnoSked — A clearer school week";
+  const title = "AnoSked? — A clearer school week";
   const description = "Turn enrolled subjects into a clear day view and weekly timetable. No account. Stored only on your device.";
   return {
     metadataBase: new URL(origin),

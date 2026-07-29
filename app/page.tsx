@@ -1,7 +1,7 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import Image from "next/image";
 
 type DayCode = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
 
@@ -47,6 +47,7 @@ type SkedData = {
   subjects: Subject[];
   tasks: Task[];
   createdAt: string;
+  consent?: { acceptedAt: string; version: string };
 };
 
 type ParseIssue = {
@@ -65,7 +66,14 @@ type ParseResult = {
   warnings: string[];
 };
 
-type View = "today" | "calendar" | "tasks" | "subjects" | "settings";
+type View = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about";
+
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
+type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance";
 
 const STORAGE_KEY = "anosked.local.v1";
 const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#3486A8", "#6B8EBD"];
@@ -77,6 +85,12 @@ const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number 
   { code: "FR", short: "F", label: "Friday", js: 5 },
   { code: "SA", short: "S", label: "Saturday", js: 6 },
   { code: "SU", short: "Su", label: "Sunday", js: 0 },
+];
+const PRIMARY_NAV: Array<{ key: View; label: string; icon: IconName }> = [
+  { key: "today", label: "Today", icon: "today" },
+  { key: "calendar", label: "Calendar", icon: "calendar" },
+  { key: "tasks", label: "Tasks", icon: "tasks" },
+  { key: "subjects", label: "Subjects", icon: "subjects" },
 ];
 
 const SAMPLE = `Welcome to Adamson University
@@ -247,6 +261,33 @@ function triggerDownload(content: BlobPart, type: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function subjectIcon(subject: Subject): IconName {
+  const name = `${subject.code} ${subject.title}`.toLowerCase();
+  if (/research|thesis|project/.test(name)) return "flask";
+  if (/crypto|security|coding theory/.test(name)) return "key";
+  if (/parallel|distributed|comput/.test(name)) return "cpu";
+  if (/ethic|law|society/.test(name)) return "balance";
+  return "book";
+}
+
+function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
+  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  if (name === "today") return <svg {...common}><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>;
+  if (name === "calendar") return <svg {...common}><rect x="4" y="5" width="16" height="15" rx="3" /><path d="M8 3v4M16 3v4M4 10h16M8 14h2M14 14h2M8 17h2" /></svg>;
+  if (name === "tasks") return <svg {...common}><rect x="4" y="4" width="16" height="16" rx="4" /><path d="m8 12 2.3 2.3L16 8.8" /></svg>;
+  if (name === "subjects" || name === "book") return <svg {...common}><path d="M5 5.5A3.5 3.5 0 0 1 8.5 2H19v16H8.5A3.5 3.5 0 0 0 5 21.5z" /><path d="M5 5.5v16M9 6h6M9 10h6" /></svg>;
+  if (name === "settings") return <svg {...common}><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>;
+  if (name === "about") return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.2h.01" /></svg>;
+  if (name === "install") return <svg {...common}><path d="M12 3v11m0 0 4-4m-4 4-4-4" /><path d="M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" /></svg>;
+  if (name === "image") return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="9" cy="9" r="2" /><path d="m5 17 4-4 3 3 2-2 5 4" /></svg>;
+  if (name === "calendarAdd") return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M8 3v4M16 3v4M3 10h18M12 13v5M9.5 15.5h5" /></svg>;
+  if (name === "jump") return <svg {...common}><path d="M12 4v13m0 0 5-5m-5 5-5-5M6 21h12" /></svg>;
+  if (name === "flask") return <svg {...common}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M8 15h8" /></svg>;
+  if (name === "key") return <svg {...common}><circle cx="8" cy="12" r="4" /><path d="M12 12h9M17 12v3M20 12v2" /></svg>;
+  if (name === "cpu") return <svg {...common}><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M17 9h4M3 15h4M17 15h4" /></svg>;
+  return <svg {...common}><path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="m5 11v5c3 3 11 3 14 0v-5M21 8v6" /></svg>;
+}
+
 export default function Home() {
   const [data, setData] = useState<SkedData | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -265,6 +306,11 @@ export default function Home() {
   const [taskDue, setTaskDue] = useState("");
   const [notice, setNotice] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showExportSheet, setShowExportSheet] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [policy, setPolicy] = useState<"privacy" | "terms" | null>(null);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -278,6 +324,15 @@ export default function Home() {
       setHydrated(true);
     });
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const captureInstall = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", captureInstall);
+    return () => window.removeEventListener("beforeinstallprompt", captureInstall);
   }, []);
 
   useEffect(() => {
@@ -326,8 +381,23 @@ export default function Home() {
     }
   }
 
+  async function requestInstall() {
+    if (!installPrompt) {
+      setShowInstallGuide(true);
+      return;
+    }
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === "accepted") setNotice("AnoSked is being added to your Home Screen.");
+    setInstallPrompt(null);
+  }
+
   function saveSchedule() {
     if (!parsed) return;
+    if (!acceptedTerms) {
+      setNotice("Please review and accept the Privacy Notice and Terms first.");
+      return;
+    }
     if (!termStart || !termEnd || termEnd < termStart) {
       setNotice("Confirm a valid start and end date for the semester.");
       return;
@@ -342,6 +412,7 @@ export default function Home() {
       subjects: parsed.subjects,
       tasks: [],
       createdAt: new Date().toISOString(),
+      consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" },
     };
     setData(next);
     setPaste("");
@@ -448,7 +519,7 @@ export default function Home() {
         `DTSTART;TZID=Asia/Manila:${compact}T${start}`,
         `DTEND;TZID=Asia/Manila:${compact}T${end}`,
         `RRULE:FREQ=WEEKLY;BYDAY=${subject.meeting.days.map((day) => dayCodeMap[day]).join(",")};UNTIL=${until}`,
-        `SUMMARY:${escapeICS(`${subject.code} · ${subject.title}`)}`,
+        `SUMMARY:${escapeICS(`${subject.title} · ${subject.code}`)}`,
         `LOCATION:${escapeICS(subject.meeting.room)}`,
         "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT15M", `DESCRIPTION:${escapeICS(`${subject.code} starts in 15 minutes`)}`, "END:VALARM",
         "END:VEVENT",
@@ -527,18 +598,18 @@ export default function Home() {
       const y = gridTop + startOffset * hourHeight + 3;
       const blockWidth = dayWidth - 8;
       const blockHeight = Math.max(duration * hourHeight - 6, 34);
-      ctx.globalAlpha = .16;
+      ctx.globalAlpha = .88;
       ctx.fillStyle = subject.color;
       ctx.beginPath(); ctx.roundRect(x, y, blockWidth, blockHeight, 14); ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.fillStyle = "#153A52";
+      ctx.fillStyle = "#FFFFFF";
       ctx.textAlign = "left";
-      ctx.font = `700 ${mode === "wallpaper" ? 14 : 19}px -apple-system, BlinkMacSystemFont, sans-serif`;
-      ctx.fillText(subject.code, x + 10, y + 23, blockWidth - 18);
+      ctx.font = `700 ${mode === "wallpaper" ? 12 : 16}px -apple-system, BlinkMacSystemFont, sans-serif`;
+      ctx.fillText(subject.title, x + 10, y + 22, blockWidth - 18);
       if (blockHeight > 54) {
-        ctx.fillStyle = "#56788D";
+        ctx.fillStyle = "rgba(255,255,255,.84)";
         ctx.font = `600 ${mode === "wallpaper" ? 11 : 15}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.fillText(subject.meeting.room, x + 10, y + 43, blockWidth - 18);
+        ctx.fillText(`${subject.code} · ${subject.meeting.room}`, x + 10, y + 43, blockWidth - 18);
       }
     }));
 
@@ -553,41 +624,42 @@ export default function Home() {
     }, "image/png");
   }
 
-  if (!hydrated) return <main className="loading-screen"><Image className="brand-mark" src="/assets/AnoSkedfinallogo.png" alt="" width={62} height={62} priority /><p>Preparing AnoSked…</p></main>;
+  if (!hydrated) return <main className="loading-screen"><img className="brand-mark" src="/assets/AnoSkedfinallogo.png" alt="" /><p>Preparing AnoSked…</p></main>;
 
   if (!data) {
     return (
       <main className="onboarding-shell">
         <header className="public-header">
-          <a className="wordmark" href="#top" aria-label="AnoSked home"><Image className="brand-mark small" src="/assets/AnoSkedfinallogo.png" alt="" width={38} height={38} priority />AnoSked</a>
-          <span className="header-note">Private. Offline-ready.</span>
+          <a className="wordmark" href="#top" aria-label="AnoSked home"><img className="brand-mark small" src="/assets/AnoSkedfinallogo.png" alt="" />AnoSked?</a>
+          <button className="header-install" onClick={requestInstall}><Icon name="install" size={16} /> Add to Home Screen</button>
         </header>
 
         <section className="onboarding-grid" id="top">
           <div className="intro-copy">
-            <div className="eyebrow">A clearer school week</div>
-            <h1>Your semester,<br />at a glance.</h1>
-            <p>Paste your enrolled subjects. AnoSked turns them into a timetable you can actually read.</p>
+            <img className="hero-mascot" src="/assets/AnoSkedlogo.png" alt="AnoSked carabao mascot" />
+            <h1>Know your week.<br />Keep your cool.</h1>
+            <p>A friendly calendar for classes, rooms, and schoolwork—built directly from your enrolled subjects.</p>
+            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><a href="#import">Set up my schedule</a></div>
             <div className="mini-week" aria-label="Sample weekly timetable">
               <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
               <div className="mini-week-grid">
-                <div className="mini-block one"><strong>CS420</strong><span>SV217</span></div>
-                <div className="mini-block two"><strong>CS468</strong><span>SV213</span></div>
-                <div className="mini-block three"><strong>CS342</strong><span>SV213</span></div>
+                <div className="mini-block one"><strong>Research</strong><span>6 PM · SV217</span></div>
+                <div className="mini-block two"><strong>Parallel Computing</strong><span>6 PM · SV213</span></div>
+                <div className="mini-block three"><strong>Ethics</strong><span>6 PM · SV213</span></div>
               </div>
             </div>
           </div>
 
-          <div className="paste-card">
+          <div className="paste-card" id="import">
             {stage === "paste" ? (
               <>
                 <div className="card-heading">
-                  <div><h2>Import your schedule</h2><p>Paste the page or just its enrolled-subjects table.</p></div>
+                  <div><h2>Paste your subjects</h2><p>We’ll find the subject names, rooms, days, and times.</p></div>
                 </div>
                 <textarea value={paste} onChange={(event) => { setPaste(event.target.value); setIssue(null); }} placeholder="Paste your enrolled subjects here…" aria-label="Subject enlistment text" />
                 {issue && (
                   <div className="error-panel" role="alert">
-                    <div className="error-icon">!</div>
+                    <img src="/assets/thinking.png" alt="" />
                     <div><strong>{issue.title}</strong><p>{issue.detail}</p><button className="text-button" onClick={() => setPaste(SAMPLE)}>Load an example</button></div>
                   </div>
                 )}
@@ -624,13 +696,16 @@ export default function Home() {
                   <summary>Optional profile details</summary>
                   <div className="profile-fields"><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Optional" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} placeholder="Optional" /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} placeholder="Optional" /></label></div>
                 </details>
-                <button className="primary-button wide" disabled={!parsed.subjects.length} onClick={saveSchedule}>Save schedule</button>
+                <label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label>
+                <button className="primary-button wide" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button>
               </>
             ) : null}
           </div>
         </section>
-        <footer className="public-footer">Local for now. Removing the app or clearing browser data removes its data too.</footer>
-        {notice && <div className="toast">{notice}</div>}
+        <footer className="public-footer"><span>© 2026 AnoSked? · Made for calmer school days.</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button><button onClick={() => setShowInstallGuide(true)}>Install help</button></nav></footer>
+        {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
+        {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
+        {notice && <BrandedToast message={notice} />}
       </main>
     );
   }
@@ -638,21 +713,19 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="wordmark app-wordmark"><Image className="brand-mark small" src="/assets/AnoSkedfinallogo.png" alt="" width={38} height={38} priority />AnoSked</div>
+        <div className="wordmark app-wordmark"><img className="brand-mark small" src="/assets/AnoSkedfinallogo.png" alt="" />AnoSked?</div>
         <nav>
-          {([
-            ["today", "Today"], ["calendar", "Calendar"], ["tasks", "Tasks"], ["subjects", "Subjects"],
-          ] as Array<[View, string]>).map(([key, label]) => (
-            <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{label}{key === "tasks" && data.tasks.filter((task) => !task.done).length > 0 ? <b>{data.tasks.filter((task) => !task.done).length}</b> : null}</button>
+          {PRIMARY_NAV.map(({ key, label, icon }) => (
+            <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === "tasks" && data.tasks.filter((task) => !task.done).length > 0 ? <b>{data.tasks.filter((task) => !task.done).length}</b> : null}</button>
           ))}
         </nav>
-        <button className="sidebar-settings" onClick={() => setView("settings")}>Settings</button>
+        <div className="sidebar-secondary"><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><Icon name="settings" /><span>Settings</span></button><button className={view === "about" ? "active" : ""} onClick={() => setView("about")}><Icon name="about" /><span>About</span></button></div>
       </aside>
 
       <section className="app-main">
         <header className="app-header">
-          <div><span className="mobile-wordmark">AnoSked</span><p>{data.semester}{data.block ? ` · ${data.block}` : ""}</p></div>
-          <button className="manage-button" onClick={() => setView("settings")}>Manage</button>
+          <div><span className="mobile-wordmark"><img src="/assets/AnoSkedfinallogo.png" alt="" />AnoSked?</span><p>{data.semester}{data.block ? ` · ${data.block}` : ""}</p></div>
+          <button className="header-icon-button" onClick={() => setView("about")} aria-label="About AnoSked"><Icon name="about" /></button>
         </header>
 
         {view === "today" && (
@@ -676,14 +749,14 @@ export default function Home() {
                   return <div className={`timeline-event ${active ? "is-active" : ""}`} key={subject.id}>
                     <div className="timeline-time"><strong>{formatTime(subject.meeting.start)}</strong><span>{formatTime(subject.meeting.end)}</span></div>
                     <div className="event-line"><i style={{ background: subject.color }} /></div>
-                    <div className="event-content"><div className="event-top"><div><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span><h3>{subject.title}</h3></div>{active ? <span className="now-pill">Now</span> : null}</div><p className="event-meta"><b>{subject.meeting.room}</b><span>·</span>{subject.units} units</p>
-                      {linked.map((task) => <button className={`inline-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span>{task.title}</button>)}
+                    <div className="event-content"><div className="event-top"><div><h3>{subject.title}</h3><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span></div>{active ? <span className="now-pill">Now</span> : null}</div><p className="event-meta"><b>{subject.meeting.room}</b><span>·</span>{subject.units} units</p>
+                      {linked.map((task) => <button className={`inline-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span className="task-check">{task.done ? "✓" : ""}</span><b>{task.title}</b></button>)}
                     </div>
                   </div>;
                 })}
               </div>
               <aside className="today-side">
-                <div className="side-card"><div className="section-heading"><h2>Due today</h2><button onClick={() => setView("tasks")}>View all</button></div>{todayTasks.length ? todayTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`side-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{subject?.code} · {new Date(task.dueAt).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <p className="muted-copy">Nothing due. Your evening is yours.</p>}</div>
+                <div className="side-card"><div className="section-heading"><h2>Due today</h2><button onClick={() => setView("tasks")}>View all</button></div>{todayTasks.length ? todayTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`side-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{subject?.title} · {new Date(task.dueAt).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="All clear" detail="Nothing is due today." />}</div>
               </aside>
             </div>
           </div>
@@ -692,14 +765,14 @@ export default function Home() {
         {view === "calendar" && (
           <div className="page calendar-page">
             <div className="calendar-toolbar">
-              <div><h1>Calendar</h1><p>{data.semester}</p></div>
+              <div><h1>Calendar</h1><p>See one day up close or your whole week at once.</p></div>
               <div className="calendar-actions">
                 <div className="view-switch" aria-label="Calendar view">
                   <button className={calendarMode === "day" ? "active" : ""} onClick={() => setCalendarMode("day")}>Day</button>
                   <button className={calendarMode === "week" ? "active" : ""} onClick={() => setCalendarMode("week")}>Week</button>
                 </div>
-                <button className="quiet-button" onClick={exportICS}>Add to calendar</button>
-                <button className="sky-button" onClick={() => drawSchedule("share")}>Save image</button>
+                <button className="quiet-button icon-button" onClick={exportICS}><Icon name="calendarAdd" size={16} /> Add to calendar</button>
+                <button className="sky-button icon-button" onClick={() => setShowExportSheet(true)}><Icon name="image" size={16} /> Save image</button>
               </div>
             </div>
 
@@ -711,8 +784,8 @@ export default function Home() {
                   {daySubjects.length ? daySubjects.map((subject) => (
                     <div className="day-class" key={subject.id}>
                       <div className="day-class-time"><strong>{formatTime(subject.meeting.start)}</strong><span>{formatTime(subject.meeting.end)}</span></div>
-                      <div className="day-class-card" style={{ background: `${subject.color}18` }}>
-                        <div><strong>{subject.code}</strong><span>{subject.title}</span></div><b>{subject.meeting.room}</b>
+                      <div className="day-class-card" style={{ background: subject.color }}>
+                        <div><strong>{subject.title}</strong><span>{subject.code}</span></div><b>{subject.meeting.room}</b>
                       </div>
                     </div>
                   )) : <EmptyState title="No classes" detail="Nothing scheduled for this day." />}
@@ -720,33 +793,29 @@ export default function Home() {
               </>
             ) : <WeeklyTimetable subjects={data.subjects} />}
 
-            <div className="calendar-export-bar">
-              <span>Use this weekly layout anywhere.</span>
-              <div><button onClick={() => drawSchedule("wallpaper")}>iPhone wallpaper</button><button onClick={() => drawSchedule("share")}>PNG image</button></div>
-            </div>
           </div>
         )}
 
         {view === "tasks" && (
           <div className="page tasks-page">
-            <div className="page-title-row"><div><h1>Tasks</h1><p>{data.tasks.filter((task) => !task.done).length} open</p></div></div>
+            <div className="page-title-row mascot-title"><div><h1>Tasks</h1><p>{data.tasks.filter((task) => !task.done).length} open · Keep each deadline connected to its subject.</p></div><img src="/assets/studying.png" alt="AnoSked studying" /></div>
             <div className="tasks-layout">
-              <div className="task-composer"><h2>Add a task</h2><label>What needs to be done?<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="Finish research chapter 1" /></label><label>Subject<select value={taskSubject} onChange={(e) => setTaskSubject(e.target.value)}><option value="">Choose a subject</option>{data.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.title}</option>)}</select></label><label>Due date<input type="datetime-local" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} /></label><div className="quick-dates"><button onClick={setDueNextClass}>Due next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>7 days from now</button></div><button className="primary-button wide" onClick={createTask}>Add task</button></div>
-              <div className="task-list-card"><div className="section-heading"><h2>All tasks</h2><span>{data.tasks.filter((task) => !task.done).length} open</span></div>{data.tasks.length ? [...data.tasks].sort((a, b) => a.dueAt.localeCompare(b.dueAt)).map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`task-row ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span className="task-check">{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p><b style={{ color: subject?.color }}>{subject?.code}</b> · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="No tasks yet" detail="Add your first task and connect it to a subject." />}</div>
+              <div className="task-composer"><h2>New task</h2><label>Task title<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} aria-label="Task title" /></label><label>Subject<select value={taskSubject} onChange={(e) => setTaskSubject(e.target.value)}><option value="">Choose a subject</option>{data.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.title} — {subject.code}</option>)}</select></label><label>Due date<input type="datetime-local" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} /></label><div className="quick-dates"><button onClick={setDueNextClass}>Next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>In 7 days</button></div><button className="primary-button wide" onClick={createTask}>Add task</button></div>
+              <div className="task-list-card"><div className="section-heading"><h2>Your tasks</h2><span>{data.tasks.filter((task) => !task.done).length} open</span></div>{data.tasks.length ? [...data.tasks].sort((a, b) => a.dueAt.localeCompare(b.dueAt)).map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`task-row ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span className="task-check">{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p><b style={{ color: subject?.color }}>{subject?.title}</b> · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="No tasks yet" detail="Add one when something comes up." />}</div>
             </div>
           </div>
         )}
 
         {view === "subjects" && (
           <div className="page">
-            <div className="page-title-row"><div><h1>Subjects</h1><p>{data.subjects.length} subjects · {data.totalUnits} units</p></div></div>
-            <div className="subject-grid">{data.subjects.map((subject) => <article className="subject-card" key={subject.id}><div className="subject-card-top"><span className="subject-bubble" style={{ background: `${subject.color}18`, color: subject.color }}>{subject.code.slice(0, 2)}</span><span className="unit-pill">{subject.units} units</span></div><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span><h2>{subject.title}</h2><div className="subject-detail"><span>{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><strong>{formatTime(subject.meeting.start)}–{formatTime(subject.meeting.end)}</strong></div><div className="subject-room"><span>Room</span><strong>{subject.meeting.room}</strong></div><div className="subject-task-count">{data.tasks.filter((task) => task.subjectId === subject.id && !task.done).length} open tasks</div></article>)}</div>
+            <div className="page-title-row"><div><h1>Subjects</h1><p>{data.subjects.length} subjects · {data.totalUnits} units · Rooms and schedules in one place.</p></div></div>
+            <div className="subject-grid">{data.subjects.map((subject) => <article className="subject-card" key={subject.id}><div className="subject-card-top"><span className="subject-bubble" style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={21} /></span><span className="unit-pill">{subject.units} units</span></div><h2>{subject.title}</h2><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span><div className="subject-detail"><span>{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><strong>{formatTime(subject.meeting.start)}–{formatTime(subject.meeting.end)}</strong></div><div className="subject-room"><span>Room</span><strong>{subject.meeting.room}</strong></div><div className="subject-task-count">{data.tasks.filter((task) => task.subjectId === subject.id && !task.done).length} open tasks</div></article>)}</div>
           </div>
         )}
 
         {view === "settings" && (
           <div className="page settings-page">
-            <div className="page-title-row"><div><h1>Settings</h1></div></div>
+            <div className="page-title-row mascot-title"><div><h1>Settings</h1><p>Back up, personalize, or reset AnoSked.</p></div><img src="/assets/checklist.png" alt="AnoSked checklist" /></div>
             <div className="settings-panel">
               <div className="local-disclosure"><strong>Local storage</strong><span>AnoSked collects nothing. Delete the app or clear browser data and this schedule is gone.</span></div>
               <details open>
@@ -761,38 +830,66 @@ export default function Home() {
                 <summary><span><strong>Schedule</strong><small>{data.subjects.length} subjects · {data.semester}</small></span><b>›</b></summary>
                 <div className="setting-content"><button className="danger-button" onClick={() => setConfirmDelete(true)}>Delete local data</button></div>
               </details>
+              <button className="settings-link" onClick={() => setView("about")}><span><Icon name="about" /><span><strong>About AnoSked?</strong><small>Privacy, Terms, and how local storage works</small></span></span><b>›</b></button>
             </div>
+          </div>
+        )}
+
+        {view === "about" && (
+          <div className="page about-page">
+            <div className="about-hero"><img src="/assets/AnoSkedlogo.png" alt="AnoSked carabao mascot" /><div><h1>About AnoSked?</h1><p>A friendly, independent student planner that turns enrolled subjects into a clearer week.</p></div></div>
+            <div className="about-grid">
+              <section><h2>Built to stay local</h2><p>Your pasted text, subjects, tasks, and optional profile stay in this browser. AnoSked has no account system, creator-accessible database, or analytics tracker.</p><button onClick={() => setPolicy("privacy")}>Read Privacy Notice</button></section>
+              <section><h2>Keep your official record close</h2><p>AnoSked helps you read and remember your schedule, but your school’s official portal remains the source of truth.</p><button onClick={() => setPolicy("terms")}>Read Terms</button></section>
+              <section><h2>Install when you’re ready</h2><p>Add AnoSked to your Home Screen for a full-screen, app-like experience on supported phones and tablets.</p><button onClick={requestInstall}><Icon name="install" size={15} /> Install AnoSked?</button></section>
+              <section><h2>Your consent</h2><p>Privacy Notice and Terms accepted {data.consent?.acceptedAt ? new Date(data.consent.acceptedAt).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }) : "on this device"}.</p></section>
+            </div>
+            <footer className="about-footer">AnoSked? · Version 1.0 · Not affiliated with any university.</footer>
           </div>
         )}
       </section>
 
       <nav className="mobile-nav">
-        {([ ["today", "Today"], ["calendar", "Calendar"], ["tasks", "Tasks"], ["subjects", "Subjects"], ["settings", "Settings"] ] as Array<[View, string]>).map(([key, label]) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{label}</button>)}
+        {PRIMARY_NAV.map(({ key, label, icon }) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><Icon name={icon} size={18} /><span>{label}</span></button>)}
+        <button className={view === "settings" || view === "about" ? "active" : ""} onClick={() => setView("settings")}><Icon name="settings" size={18} /><span>More</span></button>
       </nav>
       {confirmDelete && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmDelete(false); }}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
-            <Image src="/assets/AnoSkedfinallogo.png" alt="" width={54} height={54} />
+            <img src="/assets/AnoSkedlogo.png" alt="" />
             <h2 id="delete-title">Delete this schedule?</h2>
             <p>Subjects and tasks will be removed from this device. A backup is the only way to restore them.</p>
             <div><button className="quiet-button" onClick={() => setConfirmDelete(false)}>Cancel</button><button className="confirm-delete" onClick={() => { setConfirmDelete(false); setData(null); setStage("paste"); }}>Delete</button></div>
           </div>
         </div>
       )}
-      {notice && <div className="toast">{notice}</div>}
+      {showExportSheet && <ExportDialog onClose={() => setShowExportSheet(false)} onWallpaper={() => { setShowExportSheet(false); drawSchedule("wallpaper"); }} onImage={() => { setShowExportSheet(false); drawSchedule("share"); }} />}
+      {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
+      {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
+      {!data.consent && <ConsentDialog onAccept={() => setData({ ...data, consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" } })} onPolicy={setPolicy} />}
+      {notice && <BrandedToast message={notice} />}
     </main>
   );
 }
 
 function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
+  const timetableRef = useRef<HTMLDivElement>(null);
   const firstHour = 7;
   const lastHour = 22;
   const hours = Array.from({ length: lastHour - firstHour + 1 }, (_, index) => firstHour + index);
   const totalMinutes = (lastHour - firstHour) * 60;
   const events = subjects.flatMap((subject) => subject.meeting.days.map((day) => ({ subject, day })));
+  const earliest = [...subjects].sort((a, b) => a.meeting.start.localeCompare(b.meeting.start))[0];
+  const jumpKey = earliest ? `${earliest.id}-${earliest.meeting.days[0]}` : "";
+
+  function jumpToClasses() {
+    timetableRef.current?.querySelector(".jump-target")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
 
   return (
-    <div className="timetable-shell">
+    <div className="weekly-view">
+      <div className="timetable-intro"><div><strong>Your weekly timetable</strong><span>{earliest ? `First class begins at ${formatTime(earliest.meeting.start).replace(":00", "")}.` : "No classes scheduled."}</span></div>{earliest && <button onClick={jumpToClasses}><Icon name="jump" size={16} /> Jump to {formatTime(earliest.meeting.start).replace(":00", "")}</button>}</div>
+      <div className="timetable-shell" ref={timetableRef}>
       <div className="timetable" aria-label="Weekly class timetable">
         <div className="timetable-header">
           <div className="time-corner" />
@@ -814,19 +911,18 @@ function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
               if (end <= 0 || start >= totalMinutes || end <= start) return null;
               return (
                 <div
-                  className="schedule-block"
+                  className={`schedule-block ${`${subject.id}-${day}` === jumpKey ? "jump-target" : ""}`}
                   key={`${subject.id}-${day}`}
                   style={{
                     left: `calc(${dayIndex * (100 / 7)}% + 4px)`,
                     width: `calc(${100 / 7}% - 8px)`,
                     top: `calc(${(start / totalMinutes) * 100}% + 3px)`,
                     height: `calc(${((end - start) / totalMinutes) * 100}% - 6px)`,
-                    background: `${subject.color}1F`,
-                    color: subject.color,
+                    background: subject.color,
                   }}
                 >
-                  <strong>{subject.code}</strong>
-                  <span>{subject.meeting.room}</span>
+                  <strong>{subject.title}</strong>
+                  <span>{subject.code} · {subject.meeting.room}</span>
                   <small>{formatTime(subject.meeting.start).replace(":00", "")}–{formatTime(subject.meeting.end).replace(":00", "")}</small>
                 </div>
               );
@@ -834,6 +930,7 @@ function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }
@@ -847,5 +944,27 @@ function DayStrip({ selectedDate, onSelect }: { selectedDate: Date; onSelect: (d
 }
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
-  return <div className="empty-state"><Image src="/assets/AnoSkedfinallogo.png" alt="" width={38} height={38} /><h3>{title}</h3><p>{detail}</p></div>;
+  return <div className="empty-state"><img src="/assets/noclass.png" alt="" /><h3>{title}</h3><p>{detail}</p></div>;
+}
+
+function BrandedToast({ message }: { message: string }) {
+  return <div className="toast" role="status"><img src="/assets/AnoSkedlogo.png" alt="" /><span>{message}</span></div>;
+}
+
+function InstallDialog({ onClose }: { onClose: () => void }) {
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog install-dialog" role="dialog" aria-modal="true" aria-labelledby="install-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/AnoSkedlogo.png" alt="" /><h2 id="install-title">Add AnoSked? to your Home Screen</h2><div className="install-steps"><div><b>iPhone or iPad</b><span>Open the Share menu, choose “Add to Home Screen,” then tap Add.</span></div><div><b>Android</b><span>Open your browser menu and choose “Install app” or “Add to Home screen.”</span></div></div><button className="sky-button wide-dialog" onClick={onClose}>Got it</button></div></div>;
+}
+
+function ExportDialog({ onClose, onWallpaper, onImage }: { onClose: () => void; onWallpaper: () => void; onImage: () => void }) {
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/AnoSkedlogo.png" alt="" /><h2 id="export-title">Save your weekly timetable</h2><p>Choose a layout. Both use the same Monday–Sunday grid shown in Calendar.</p><div className="export-choices"><button onClick={onWallpaper}><Icon name="today" /><span><strong>iPhone wallpaper</strong><small>Leaves room for the Lock Screen clock</small></span></button><button onClick={onImage}><Icon name="image" /><span><strong>PNG image</strong><small>Easy to share or keep in Photos</small></span></button></div></div></div>;
+}
+
+function PolicyDialog({ type, onClose }: { type: "privacy" | "terms"; onClose: () => void }) {
+  const privacy = type === "privacy";
+  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog policy-dialog" role="dialog" aria-modal="true" aria-labelledby="policy-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><h2 id="policy-title">{privacy ? "Privacy Notice" : "Terms of Use"}</h2><p className="policy-date">Effective July 29, 2026</p>{privacy ? <div className="policy-copy"><h3>What stays on your device</h3><p>Enrollment text is processed in your browser. Parsed subjects, tasks, optional profile labels, and your consent record are stored locally in this browser. AnoSked currently has no accounts, creator-accessible database, advertising tracker, or analytics tracker.</p><h3>What is ignored</h3><p>Student numbers, fees, balances, and payment details are not intentionally saved. The original pasted text is discarded after you confirm the parsed schedule.</p><h3>Deletion and exports</h3><p>Clearing browser data or deleting the installed app can remove everything. Backup, image, wallpaper, and calendar files leave AnoSked only when you choose to export them; the destination app then applies its own privacy practices.</p></div> : <div className="policy-copy"><h3>Use of AnoSked</h3><p>AnoSked is a convenience tool for organizing class information. Check important dates, rooms, and schedule changes against your school’s official records.</p><h3>Your responsibility</h3><p>You are responsible for reviewing parsed information, maintaining backups, and deciding what to export. AnoSked is provided as-is and may not recognize every enrollment format.</p><h3>Independence</h3><p>AnoSked is not affiliated with, endorsed by, or an official service of any university.</p></div>}<button className="sky-button wide-dialog" onClick={onClose}>Close</button></div></div>;
+}
+
+function ConsentDialog({ onAccept, onPolicy }: { onAccept: () => void; onPolicy: (policy: "privacy" | "terms") => void }) {
+  const [checked, setChecked] = useState(false);
+  return <div className="dialog-backdrop consent-layer"><div className="brand-dialog consent-dialog" role="dialog" aria-modal="true" aria-labelledby="consent-title"><img src="/assets/AnoSkedlogo.png" alt="" /><h2 id="consent-title">Before you continue</h2><p>AnoSked stores your schedule on this device. Please review how it works and agree before using this saved schedule.</p><label className="consent-row"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => onPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => onPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="sky-button wide-dialog" disabled={!checked} onClick={onAccept}>Accept and continue</button></div></div>;
 }

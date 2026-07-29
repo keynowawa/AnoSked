@@ -1,6 +1,6 @@
 {
-  "name": "AnoSked",
-  "short_name": "AnoSked",
+  "name": "AnoSked?",
+  "short_name": "AnoSked?",
   "description": "Your private, local student schedule.",
   "start_url": "/",
   "scope": "/",
@@ -8,6 +8,6 @@
   "background_color": "#F4F8FB",
   "theme_color": "#89D0EF",
   "icons": [
-    { "src": "/assets/AnoSkedfinallogo.png", "sizes": "1875x1875", "type": "image/png", "purpose": "any" }
+    { "src": "/assets/AnoSkedfinallogo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }
