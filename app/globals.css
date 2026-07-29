@@ -117,8 +117,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .hero-mascot { width:154px; height:126px; object-fit:contain; object-position:center bottom; margin-bottom:18px; }
 .hero-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px 17px; margin:-12px 0 32px; }
 .install-button { min-height:46px; padding:0 18px; border-radius:15px; font-size:12px; box-shadow:0 10px 24px rgba(69,169,215,.20); }
-.hero-actions a { color:var(--ink); font-size:11px; font-weight:700; text-underline-offset:4px; }
-.hero-share-button { min-height:40px; padding:0 13px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid rgba(69,169,215,.35); border-radius:12px; color:var(--ink); background:rgba(255,255,255,.76); font-size:10px; font-weight:750; }
+.hero-share-button { min-height:46px; padding:0 16px; display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid rgba(69,169,215,.35); border-radius:15px; color:var(--ink); background:rgba(255,255,255,.76); font-size:11px; font-weight:750; }
 .hero-share-button svg { color:#2f7f9f; }
 .mini-block { color:white; background:#378fc0; box-shadow:0 6px 14px rgba(41,104,137,.14); }
 .mini-block strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.mini-block span { color:rgba(255,255,255,.82); }

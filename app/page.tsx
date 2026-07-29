@@ -442,7 +442,6 @@ export default function Home() {
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [showTour, setShowTour] = useState(false);
-  const [shareLogoFile, setShareLogoFile] = useState<File | null>(null);
   const [policy, setPolicy] = useState<"privacy" | "terms" | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
@@ -472,15 +471,6 @@ export default function Home() {
     };
     window.addEventListener("beforeinstallprompt", captureInstall);
     return () => window.removeEventListener("beforeinstallprompt", captureInstall);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    fetch("/assets/AnoSkedfinallogo.png")
-      .then((response) => response.ok ? response.blob() : Promise.reject())
-      .then((blob) => { if (active) setShareLogoFile(new File([blob], "AnoSked-logo.png", { type: blob.type || "image/png" })); })
-      .catch(() => undefined);
-    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -603,11 +593,7 @@ export default function Home() {
     const completeMessage = `${SHARE_MESSAGE}\n\n${SHARE_URL}`;
     try {
       if (navigator.share) {
-        if (shareLogoFile && navigator.canShare?.({ files: [shareLogoFile] })) {
-          await navigator.share({ title: "AnoSked?", text: completeMessage, files: [shareLogoFile] });
-        } else {
-          await navigator.share({ title: "AnoSked?", text: SHARE_MESSAGE, url: SHARE_URL });
-        }
+        await navigator.share({ title: "AnoSked?", text: completeMessage });
         setNotice("AnoSked? is ready to share.");
         return;
       }
@@ -958,7 +944,7 @@ export default function Home() {
             <img className="hero-mascot" src="/assets/default.png" alt="AnoSked carabao mascot" />
             <h1>Your week,<br />minus the chaos.</h1>
             <p>Paste your enrolled subjects once. Get a readable week with every class, room, and task in the right place.</p>
-            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><a href="#import">Set up my schedule</a><button className="hero-share-button" onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></div>
+            <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><button className="hero-share-button" onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></div>
             <div className="mini-week" aria-label="Sample weekly timetable">
               <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
               <div className="mini-week-grid">
@@ -1177,7 +1163,7 @@ export default function Home() {
               <section><h2>Built to stay local</h2><p>Your pasted text, subjects, tasks, and optional profile stay in this browser. AnoSked has no account system, creator-accessible database, or analytics tracker.</p><button onClick={() => setPolicy("privacy")}>Read Privacy Notice</button></section>
               <section><h2>Keep your official record close</h2><p>AnoSked helps you read and remember your schedule, but your school’s official portal remains the source of truth.</p><button onClick={() => setPolicy("terms")}>Read Terms</button></section>
               <section><h2>Install when you’re ready</h2><p>Add AnoSked to your Home Screen for a full-screen, app-like experience on supported phones and tablets.</p><button onClick={requestInstall}><Icon name="install" size={15} /> Install AnoSked?</button></section>
-              <section><h2>Share it with a classmate</h2><p>Send the AnoSked? logo, a quick introduction, and the official public link through your device’s sharing menu.</p><button onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></section>
+              <section><h2>Share it with a classmate</h2><p>Send a quick introduction and the official public link through your device’s sharing menu. Supported apps can show the AnoSked? logo as the link preview.</p><button onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></section>
               <section><h2>Your consent</h2><p>Privacy Notice and Terms accepted {data.consent?.acceptedAt ? new Date(data.consent.acceptedAt).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }) : "on this device"}.</p></section>
               <section><h2>Found something off?</h2><p>Prepare a privacy-safe bug report and share it through any app you choose. AnoSked sends nothing automatically.</p><button onClick={() => setShowReport(true)}>Prepare bug report</button></section>
             </div>
