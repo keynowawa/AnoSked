@@ -77,10 +77,10 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "backup" | "profile" | "trash" | "sound" | "edit";
+type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "calculator" | "globe" | "pen" | "users" | "palette" | "backup" | "profile" | "trash" | "sound" | "edit";
 
 const STORAGE_KEY = "anosked.local.v1";
-const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#3486A8", "#6B8EBD"];
+const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#3486A8", "#6B8EBD", "#B86B5E", "#A8628E", "#C17A2F", "#4F8668", "#7E5FA7", "#5E7E87"];
 const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number }> = [
   { code: "MO", short: "Mon", label: "Monday", js: 1 },
   { code: "TU", short: "Tue", label: "Tuesday", js: 2 },
@@ -102,6 +102,11 @@ const SUBJECT_ICONS: Array<{ icon: IconName; label: string }> = [
   { icon: "cpu", label: "Technology" },
   { icon: "key", label: "Security" },
   { icon: "balance", label: "Humanities" },
+  { icon: "calculator", label: "Mathematics" },
+  { icon: "globe", label: "Language or social studies" },
+  { icon: "pen", label: "Writing" },
+  { icon: "users", label: "Group or organization" },
+  { icon: "palette", label: "Creative subject" },
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -372,7 +377,12 @@ function subjectIcon(subject: Subject): IconName {
   if (/research|thesis|project/.test(name)) return "flask";
   if (/crypto|security|coding theory/.test(name)) return "key";
   if (/parallel|distributed|comput/.test(name)) return "cpu";
-  if (/ethic|law|society/.test(name)) return "balance";
+  if (/ethic|law|philosophy/.test(name)) return "balance";
+  if (/math|statistic|account|calculus|algebra/.test(name)) return "calculator";
+  if (/language|history|society|geograph|culture/.test(name)) return "globe";
+  if (/writing|literature|communication|journal/.test(name)) return "pen";
+  if (/organization|management|team|leadership/.test(name)) return "users";
+  if (/art|design|media|creative/.test(name)) return "palette";
   return "book";
 }
 
@@ -396,6 +406,12 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   if (name === "flask") return <svg {...common}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M8 15h8" /></svg>;
   if (name === "key") return <svg {...common}><circle cx="8" cy="12" r="4" /><path d="M12 12h9M17 12v3M20 12v2" /></svg>;
   if (name === "cpu") return <svg {...common}><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M17 9h4M3 15h4M17 15h4" /></svg>;
+  if (name === "balance") return <svg {...common}><path d="M12 3v18M7 6h10M5 6l-3 6h6L5 6Zm14 0-3 6h6l-3-6ZM8 21h8" /></svg>;
+  if (name === "calculator") return <svg {...common}><rect x="5" y="3" width="14" height="18" rx="3" /><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4" /></svg>;
+  if (name === "globe") return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" /></svg>;
+  if (name === "pen") return <svg {...common}><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Z" /><path d="m13 7 4 4M4 16l4 4" /></svg>;
+  if (name === "users") return <svg {...common}><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2" /><path d="M3 20a6 6 0 0 1 12 0M15 14a5 5 0 0 1 6 5" /></svg>;
+  if (name === "palette") return <svg {...common}><path d="M12 3a9 9 0 1 0 0 18h1.5a2 2 0 0 0 0-4H12a2 2 0 0 1 0-4h5a4 4 0 0 0 4-4c0-3-4-6-9-6Z" /><path d="M7 9h.01M10 6h.01M15 7h.01M6 13h.01" /></svg>;
   return <svg {...common}><path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="m5 11v5c3 3 11 3 14 0v-5M21 8v6" /></svg>;
 }
 
