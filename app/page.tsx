@@ -317,6 +317,7 @@ export default function Home() {
   const [view, setView] = useState<View>("today");
   const [calendarMode, setCalendarMode] = useState<"day" | "week">("week");
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [clock, setClock] = useState(new Date());
   const [taskTitle, setTaskTitle] = useState("");
   const [taskSubject, setTaskSubject] = useState("");
   const [taskDue, setTaskDue] = useState("");
@@ -365,6 +366,11 @@ export default function Home() {
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(new Date()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const dayCode = getSelectedDay(selectedDate);
   const daySubjects = useMemo(() => {
     if (!data) return [];
@@ -378,12 +384,14 @@ export default function Home() {
     const key = dateKey(selectedDate);
     return data.tasks.filter((task) => task.dueAt.slice(0, 10) === key);
   }, [data, selectedDate]);
-  const selectedIsToday = dateKey(selectedDate) === dateKey(new Date());
+  const selectedIsToday = dateKey(selectedDate) === dateKey(clock);
   const selectedWeekday = selectedDate.toLocaleDateString("en-PH", { weekday: "long" });
   const firstDaySubject = daySubjects[0];
   const dashboardSummary = firstDaySubject
-    ? `You have ${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}. First up is ${firstDaySubject.title} at ${formatTime(firstDaySubject.meeting.start).replace(":00", "")} in ${firstDaySubject.meeting.room}.`
-    : "Your schedule is clear. Use Calendar when you want to look ahead.";
+    ? `${selectedIsToday ? "You have" : "There are"} ${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}${selectedIsToday ? " today" : " scheduled"}. ${selectedIsToday ? "First up" : "The first one"} is ${firstDaySubject.title} at ${formatTime(firstDaySubject.meeting.start).replace(":00", "")} in ${firstDaySubject.meeting.room}.`
+    : selectedIsToday
+      ? "No classes today—your schedule is clear."
+      : "No classes scheduled. Your day is open.";
 
   function runParser() {
     const response = parseEnrollment(paste);
@@ -781,7 +789,7 @@ export default function Home() {
         {view === "today" && (
           <div className="page today-page">
             <div className="page-title-row mascot-title dashboard-title">
-              <div><span className="dashboard-greeting">{greeting()}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `You’re viewing ${selectedWeekday}.`}</h1><p><strong>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</strong> · {dashboardSummary}</p></div>
+              <div><span className="dashboard-greeting">{greeting(clock)}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `${selectedWeekday} at a glance.`}</h1><p><strong>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</strong> · {dashboardSummary}</p></div>
               <div className="dashboard-title-side"><img src="/assets/thinking.png" alt="AnoSked thinking" /><button className="date-button" onClick={() => setSelectedDate(new Date())}>Today</button></div>
             </div>
             <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
@@ -789,7 +797,7 @@ export default function Home() {
               <div className="timeline-card">
                 <div className="section-heading"><h2>Timeline</h2><span>{DAY_META.find((day) => day.code === dayCode)?.label}</span></div>
                 {!daySubjects.length ? <EmptyState title="Walang klase today" detail="Take it easy. Swipe to another day when you want to check the rest of your week." /> : daySubjects.map((subject) => {
-                  const now = new Date();
+                  const now = clock;
                   const isToday = dateKey(now) === dateKey(selectedDate);
                   const currentMinutes = now.getHours() * 60 + now.getMinutes();
                   const [sh, sm] = subject.meeting.start.split(":").map(Number);
