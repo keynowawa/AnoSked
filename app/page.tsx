@@ -50,6 +50,8 @@ type SkedData = {
   tasks: Task[];
   createdAt: string;
   consent?: { acceptedAt: string; version: string };
+  soundEffects?: boolean;
+  tourCompleted?: boolean;
 };
 
 type ParseIssue = {
@@ -75,18 +77,18 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "backup" | "profile" | "trash";
+type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "backup" | "profile" | "trash" | "sound" | "edit";
 
 const STORAGE_KEY = "anosked.local.v1";
 const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#3486A8", "#6B8EBD"];
 const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number }> = [
-  { code: "MO", short: "M", label: "Monday", js: 1 },
-  { code: "TU", short: "T", label: "Tuesday", js: 2 },
-  { code: "WE", short: "W", label: "Wednesday", js: 3 },
-  { code: "TH", short: "Th", label: "Thursday", js: 4 },
-  { code: "FR", short: "F", label: "Friday", js: 5 },
-  { code: "SA", short: "S", label: "Saturday", js: 6 },
-  { code: "SU", short: "Su", label: "Sunday", js: 0 },
+  { code: "MO", short: "Mon", label: "Monday", js: 1 },
+  { code: "TU", short: "Tue", label: "Tuesday", js: 2 },
+  { code: "WE", short: "Wed", label: "Wednesday", js: 3 },
+  { code: "TH", short: "Thu", label: "Thursday", js: 4 },
+  { code: "FR", short: "Fri", label: "Friday", js: 5 },
+  { code: "SA", short: "Sat", label: "Saturday", js: 6 },
+  { code: "SU", short: "Sun", label: "Sunday", js: 0 },
 ];
 const PRIMARY_NAV: Array<{ key: View; label: string; icon: IconName }> = [
   { key: "today", label: "Today", icon: "today" },
@@ -117,6 +119,8 @@ function isValidStoredData(value: unknown): value is SkedData {
   if (typeof value.totalUnits !== "number" || !Number.isFinite(value.totalUnits) || value.totalUnits < 0 || value.totalUnits > 200) return false;
   if (![value.profile.nickname, value.profile.program, value.profile.yearLevel].every((item) => isShortString(item))) return false;
   if (value.exportTitle !== undefined && !isShortString(value.exportTitle, 120)) return false;
+  if (value.soundEffects !== undefined && typeof value.soundEffects !== "boolean") return false;
+  if (value.tourCompleted !== undefined && typeof value.tourCompleted !== "boolean") return false;
   const validDays = new Set(DAY_META.map((day) => day.code));
   const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
   const validSubjects = value.subjects.every((subject) => {
@@ -279,6 +283,30 @@ function greeting(date = new Date()) {
   return "Good evening";
 }
 
+function compactTitle(title: string, max = 42) {
+  const clean = title.replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
+}
+
+function playFeedbackTone(kind: "save" | "complete" = "save") {
+  const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return;
+  const context = new AudioContextClass();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(kind === "complete" ? 523 : 440, context.currentTime);
+  if (kind === "complete") oscillator.frequency.exponentialRampToValueAtTime(659, context.currentTime + 0.12);
+  gain.gain.setValueAtTime(0.0001, context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.07, context.currentTime + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.2);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start();
+  oscillator.stop(context.currentTime + 0.21);
+  oscillator.addEventListener("ended", () => void context.close());
+}
+
 function getSelectedDay(date: Date): DayCode {
   return DAY_META.find((day) => day.js === date.getDay())?.code || "MO";
 }
@@ -332,6 +360,8 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   if (name === "backup") return <svg {...common}><path d="M12 4v10m0-10L8 8m4-4 4 4" /><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg>;
   if (name === "profile") return <svg {...common}><circle cx="12" cy="8" r="4" /><path d="M5 21a7 7 0 0 1 14 0" /></svg>;
   if (name === "trash") return <svg {...common}><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></svg>;
+  if (name === "edit") return <svg {...common}><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Z" /><path d="m13 7 4 4" /></svg>;
+  if (name === "sound") return <svg {...common}><path d="M5 10v4h4l5 4V6l-5 4H5Z" /><path d="M17 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /></svg>;
   if (name === "flask") return <svg {...common}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M8 15h8" /></svg>;
   if (name === "key") return <svg {...common}><circle cx="8" cy="12" r="4" /><path d="M12 12h9M17 12v3M20 12v2" /></svg>;
   if (name === "cpu") return <svg {...common}><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M17 9h4M3 15h4M17 15h4" /></svg>;
@@ -355,6 +385,8 @@ export default function Home() {
   const [taskTitle, setTaskTitle] = useState("");
   const [taskSubject, setTaskSubject] = useState("");
   const [taskDue, setTaskDue] = useState("");
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [taskPendingDelete, setTaskPendingDelete] = useState<Task | null>(null);
   const [showDuePicker, setShowDuePicker] = useState(false);
   const [notice, setNotice] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -362,6 +394,7 @@ export default function Home() {
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [showReport, setShowReport] = useState(false);
+  const [showTour, setShowTour] = useState(false);
   const [policy, setPolicy] = useState<"privacy" | "terms" | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
@@ -410,6 +443,12 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (data?.tourCompleted !== false) return;
+    const timeout = window.setTimeout(() => setShowTour(true), 0);
+    return () => window.clearTimeout(timeout);
+  }, [data?.tourCompleted]);
+
   const dayCode = getSelectedDay(selectedDate);
   const daySubjects = useMemo(() => {
     if (!data) return [];
@@ -437,10 +476,13 @@ export default function Home() {
     return startHour * 60 + startMinute > clockMinutes;
   }) : firstDaySubject;
   const highlightedSubjectId = activeDaySubject?.id || nextDaySubject?.id;
+  const openTasks = data?.tasks.filter((task) => !task.done) || [];
+  const overdueTasks = openTasks.filter((task) => new Date(task.dueAt).getTime() < clock.getTime());
+  const semesterEnded = Boolean(data && new Date(`${data.termEnd}T23:59:59`).getTime() < clock.getTime());
   const dashboardSummary = firstDaySubject
-    ? `${selectedIsToday ? "You have" : "There are"} ${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}${selectedIsToday ? " today" : " scheduled"}. ${selectedIsToday ? "First up" : "The first one"} is ${firstDaySubject.title} at ${formatTime(firstDaySubject.meeting.start).replace(":00", "")} in ${firstDaySubject.meeting.room}.`
+    ? `${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}${selectedIsToday ? " today" : " scheduled"}. First: ${compactTitle(firstDaySubject.title)} at ${formatTime(firstDaySubject.meeting.start).replace(":00", "")} · ${firstDaySubject.meeting.room}.`
     : selectedIsToday
-      ? "No classes today—your schedule is clear."
+      ? "No classes today. Your schedule is clear."
       : "No classes scheduled. Your day is open.";
 
   function runParser() {
@@ -496,12 +538,15 @@ export default function Home() {
       tasks: [],
       createdAt: new Date().toISOString(),
       consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" },
+      soundEffects: false,
+      tourCompleted: false,
     };
     setData(next);
     setPaste("");
     setParsed(null);
     setStage("paste");
     setView("today");
+    setShowTour(true);
     setNotice("Your sked is saved on this device.");
   }
 
@@ -533,6 +578,7 @@ export default function Home() {
   function addSubject(subject: Subject) {
     if (!data) return;
     setData({ ...data, subjects: [...data.subjects, subject], totalUnits: data.totalUnits + subject.units });
+    if (data.soundEffects) playFeedbackTone();
     setShowSubjectForm(false);
     setNotice(`${subject.title} was added.`);
   }
@@ -542,11 +588,41 @@ export default function Home() {
       setNotice("Add a task, subject, and due date first.");
       return;
     }
-    const task: Task = { id: uid("task"), subjectId: taskSubject, title: taskTitle.trim(), dueAt: taskDue, done: false };
-    setData({ ...data, tasks: [...data.tasks, task] });
+    if (editingTaskId) {
+      setData({ ...data, tasks: data.tasks.map((task) => task.id === editingTaskId ? { ...task, subjectId: taskSubject, title: taskTitle.trim(), dueAt: taskDue } : task) });
+    } else {
+      const task: Task = { id: uid("task"), subjectId: taskSubject, title: taskTitle.trim(), dueAt: taskDue, done: false };
+      setData({ ...data, tasks: [...data.tasks, task] });
+    }
+    if (data.soundEffects) playFeedbackTone();
     setTaskTitle("");
+    setTaskSubject("");
     setTaskDue("");
-    setNotice("Task added.");
+    setEditingTaskId(null);
+    setNotice(editingTaskId ? "Task updated." : "Task added.");
+  }
+
+  function editTask(task: Task) {
+    setTaskTitle(task.title);
+    setTaskSubject(task.subjectId);
+    setTaskDue(task.dueAt.slice(0, 16));
+    setEditingTaskId(task.id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelTaskEdit() {
+    setEditingTaskId(null);
+    setTaskTitle("");
+    setTaskSubject("");
+    setTaskDue("");
+  }
+
+  function deleteTask() {
+    if (!data || !taskPendingDelete) return;
+    setData({ ...data, tasks: data.tasks.filter((task) => task.id !== taskPendingDelete.id) });
+    if (editingTaskId === taskPendingDelete.id) cancelTaskEdit();
+    setTaskPendingDelete(null);
+    setNotice("Task deleted.");
   }
 
   function setDueNextClass() {
@@ -563,7 +639,9 @@ export default function Home() {
 
   function toggleTask(id: string) {
     if (!data) return;
+    const completing = data.tasks.some((task) => task.id === id && !task.done);
     setData({ ...data, tasks: data.tasks.map((task) => task.id === id ? { ...task, done: !task.done } : task) });
+    if (data.soundEffects && completing) playFeedbackTone("complete");
   }
 
   function exportBackup() {
@@ -736,21 +814,21 @@ export default function Home() {
     }, "image/png");
   }
 
-  if (!hydrated) return <main className="loading-screen"><img className="brand-mark" src="/assets/AnoSkedfinallogo.png" alt="" /><p>Preparing AnoSked…</p></main>;
+  if (!hydrated) return <main className="loading-screen"><img className="brand-mark" src="/assets/AnoSkedicon.png" alt="" /><p>Preparing AnoSked…</p></main>;
 
   if (!data) {
     return (
       <main className="onboarding-shell">
         <header className="public-header">
-          <a className="wordmark" href="#top" aria-label="AnoSked home"><img className="brand-mark small" src="/assets/AnoSkedfinallogo.png" alt="" />AnoSked?</a>
+          <a className="wordmark" href="#top" aria-label="AnoSked home"><img className="brand-mark small" src="/assets/default.png" alt="" />AnoSked?</a>
           <button className="header-install" onClick={requestInstall}><Icon name="install" size={16} /> Add to Home Screen</button>
         </header>
 
         <section className="onboarding-grid" id="top">
           <div className="intro-copy">
             <img className="hero-mascot" src="/assets/default.png" alt="AnoSked carabao mascot" />
-            <h1>Know your week.<br />Keep your cool.</h1>
-            <p>A friendly calendar for classes, rooms, and schoolwork—built directly from your enrolled subjects.</p>
+            <h1>Your week,<br />minus the chaos.</h1>
+            <p>Turn enrolled subjects into a clear calendar, room guide, and task list. No spreadsheet energy required.</p>
             <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><a href="#import">Set up my schedule</a></div>
             <div className="mini-week" aria-label="Sample weekly timetable">
               <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
@@ -779,7 +857,7 @@ export default function Home() {
                   <button className="secondary-button" onClick={() => { setPaste(SAMPLE); setIssue(null); }}>Try sample</button>
                   <button className="primary-button" onClick={runParser}>Continue</button>
                 </div>
-                <p className="one-line-privacy">Processed on this device. No account, upload, or student number.</p>
+                <p className="one-line-privacy">Your schedule stays on this device. No account, no upload, and student numbers are ignored.</p>
               </>
             ) : parsed ? (
               <>
@@ -826,7 +904,7 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="wordmark app-wordmark"><img className="brand-mark small" src="/assets/AnoSkedfinallogo.png" alt="" />AnoSked?</div>
+        <div className="wordmark app-wordmark"><img className="brand-mark small" src="/assets/default.png" alt="" />AnoSked?</div>
         <nav>
           {PRIMARY_NAV.map(({ key, label, icon }) => (
             <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === "tasks" && data.tasks.filter((task) => !task.done).length > 0 ? <b>{data.tasks.filter((task) => !task.done).length}</b> : null}</button>
@@ -837,7 +915,7 @@ export default function Home() {
 
       <section className="app-main">
         <header className="app-header">
-          <div><span className="mobile-wordmark"><img src="/assets/AnoSkedfinallogo.png" alt="" />AnoSked?</span><p>{data.semester}{data.block ? ` · ${data.block}` : ""}</p></div>
+          <div><span className="mobile-wordmark"><img src="/assets/default.png" alt="" />AnoSked?</span><p>{data.semester}{data.block ? ` · ${data.block}` : ""}</p></div>
           <button className="header-icon-button" onClick={() => setView("about")} aria-label="About AnoSked"><Icon name="about" /></button>
         </header>
 
@@ -847,6 +925,7 @@ export default function Home() {
               <div><span className="dashboard-greeting">{greeting(clock)}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `${selectedWeekday} at a glance.`}</h1><p><strong>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</strong> · {dashboardSummary}</p></div>
               <div className="dashboard-title-side"><img src="/assets/thinking.png" alt="AnoSked thinking" /><button className="date-button" onClick={() => setSelectedDate(new Date())}>Today</button></div>
             </div>
+            {semesterEnded && <div className="semester-banner"><span><Icon name="calendar" size={18} /></span><div><strong>This semester has ended</strong><p>Your schedule stays here until you replace or delete it. Export a backup before starting a new semester.</p></div><button onClick={exportBackup}>Export backup</button></div>}
             <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
             <div className="today-layout">
               <div className="timeline-card">
@@ -912,10 +991,16 @@ export default function Home() {
 
         {view === "tasks" && (
           <div className="page tasks-page">
-            <div className="page-title-row mascot-title"><div><h1>Tasks</h1><p>{data.tasks.filter((task) => !task.done).length} open · Keep each deadline connected to its subject.</p></div><img src="/assets/studying.png" alt="AnoSked studying" /></div>
+            <div className="page-title-row mascot-title"><div><h1>Tasks</h1><p>{openTasks.length} open{overdueTasks.length ? ` · ${overdueTasks.length} overdue` : ""} · Keep each deadline connected to its subject.</p></div><img src="/assets/studying.png" alt="AnoSked studying" /></div>
             <div className="tasks-layout">
-              <div className="task-composer"><div className="composer-heading"><h2>New task</h2><p>Three quick choices, then you’re done.</p></div><label className="task-title-field">Task title<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} aria-label="Task title" placeholder="e.g. Finish the research introduction" /></label><div className="task-field-group"><span className="field-label">Subject</span><div className="task-subject-choices">{data.subjects.map((subject) => <button key={subject.id} className={taskSubject === subject.id ? "selected" : ""} onClick={() => setTaskSubject(subject.id)}><span style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={15} /></span><b>{subject.title}</b><small>{subject.code}</small></button>)}</div></div><div className="task-field-group"><span className="field-label">When is it due?</span><div className="quick-dates"><button onClick={setDueNextClass}>Next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>Tomorrow</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>In 7 days</button></div><button className={`due-date-button ${taskDue ? "has-value" : ""}`} onClick={() => setShowDuePicker(true)}><Icon name="calendar" size={17} /><span><small>Choose a date and time</small><strong>{taskDue ? new Date(taskDue).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "Not selected"}</strong></span><b>›</b></button></div><button className="primary-button wide" onClick={createTask}>Add task</button></div>
-              <div className="task-list-card"><div className="section-heading"><h2>Your tasks</h2><span>{data.tasks.filter((task) => !task.done).length} open</span></div>{data.tasks.length ? [...data.tasks].sort((a, b) => a.dueAt.localeCompare(b.dueAt)).map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`task-row ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span className="task-check">{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p><b style={{ color: subject?.color }}>{subject?.title}</b> · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="No tasks yet" detail="Add one when something comes up." />}</div>
+              <div className="task-composer"><div className="composer-heading"><h2>{editingTaskId ? "Edit task" : "New task"}</h2><p>{editingTaskId ? "Update what changed, then save." : "Three quick choices, then you’re done."}</p></div><label className="task-title-field">Task title<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} aria-label="Task title" placeholder="e.g. Finish the research introduction" /></label><div className="task-field-group"><span className="field-label">Subject</span><div className="task-subject-choices">{data.subjects.map((subject) => <button key={subject.id} className={taskSubject === subject.id ? "selected" : ""} onClick={() => setTaskSubject(subject.id)}><span style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={15} /></span><b>{subject.title}</b><small>{subject.code}</small></button>)}</div></div><div className="task-field-group"><span className="field-label">When is it due?</span><div className="quick-dates"><button onClick={setDueNextClass}>Next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>Tomorrow</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>In 7 days</button></div><button className={`due-date-button ${taskDue ? "has-value" : ""}`} onClick={() => setShowDuePicker(true)}><Icon name="calendar" size={17} /><span><small>Choose a date and time</small><strong>{taskDue ? new Date(taskDue).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "Not selected"}</strong></span><b>›</b></button></div><div className="task-submit-row">{editingTaskId && <button className="quiet-button" onClick={cancelTaskEdit}>Cancel</button>}<button className="primary-button" onClick={createTask}>{editingTaskId ? "Save changes" : "Add task"}</button></div></div>
+              <div className="task-list-card"><div className="section-heading"><h2>Your tasks</h2><span>{openTasks.length} open</span></div>{data.tasks.length ? [...data.tasks].sort((a, b) => {
+                if (a.done !== b.done) return a.done ? 1 : -1;
+                const aOverdue = new Date(a.dueAt).getTime() < clock.getTime();
+                const bOverdue = new Date(b.dueAt).getTime() < clock.getTime();
+                if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+                return a.dueAt.localeCompare(b.dueAt);
+              }).map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); const overdue = !task.done && new Date(task.dueAt).getTime() < clock.getTime(); return <div className={`task-row ${task.done ? "done" : ""} ${overdue ? "overdue" : ""}`} key={task.id}><button className="task-check" onClick={() => toggleTask(task.id)} aria-label={task.done ? `Mark ${task.title} incomplete` : `Mark ${task.title} complete`}>{task.done ? "✓" : ""}</button><div><span className="task-title-line"><strong>{task.title}</strong>{overdue && <em>Overdue</em>}</span><p><b style={{ color: subject?.color }}>{subject?.title}</b> · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div><div className="task-row-actions"><button onClick={() => editTask(task)} aria-label={`Edit ${task.title}`} title="Edit"><Icon name="edit" size={15} /></button><button className="delete-task-button" onClick={() => setTaskPendingDelete(task)} aria-label={`Delete ${task.title}`} title="Delete"><Icon name="trash" size={15} /></button></div></div>; }) : <EmptyState title="No tasks yet" detail="Add one when something comes up." />}</div>
             </div>
           </div>
         )}
@@ -940,6 +1025,10 @@ export default function Home() {
                 <div className="setting-content settings-form"><label>Export heading<input value={data.exportTitle || ""} onChange={(e) => setData({ ...data, exportTitle: e.target.value })} placeholder="My week" /></label><label>Name or nickname<input value={data.profile.nickname} onChange={(e) => setData({ ...data, profile: { ...data.profile, nickname: e.target.value } })} placeholder="Optional" /></label><label>Program<input value={data.profile.program} onChange={(e) => setData({ ...data, profile: { ...data.profile, program: e.target.value } })} placeholder="Optional" /></label><label>Year level<input value={data.profile.yearLevel} onChange={(e) => setData({ ...data, profile: { ...data.profile, yearLevel: e.target.value } })} placeholder="Optional" /></label><p className="autosave-note">Changes save automatically on this device.</p></div>
               </details>
               <details>
+                <summary><span className="setting-summary-main"><i><Icon name="sound" size={17} /></i><span><strong>In-app sounds</strong><small>{data.soundEffects ? "On for saves and completed tasks" : "Off by default"}</small></span></span><b>›</b></summary>
+                <div className="setting-content sound-setting"><div><strong>Gentle feedback sounds</strong><p>Plays only while AnoSked is open. Your phone controls notification sounds.</p></div><button className={`switch-control ${data.soundEffects ? "on" : ""}`} role="switch" aria-checked={Boolean(data.soundEffects)} onClick={() => { const enabled = !data.soundEffects; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div>
+              </details>
+              <details>
                 <summary><span className="setting-summary-main"><i><Icon name="calendarAdd" size={17} /></i><span><strong>Class reminders</strong><small>Use dependable Apple or Google Calendar alerts</small></span></span><b>›</b></summary>
                 <div className="setting-content reminder-setting"><p>System Web Push needs a future notification service. For now, export recurring classes with 15-minute calendar alerts.</p><button className="sky-button icon-button" onClick={exportICS}><Icon name="calendarAdd" size={15} /> Add to calendar</button></div>
               </details>
@@ -947,7 +1036,7 @@ export default function Home() {
                 <summary><span className="setting-summary-main"><i className="danger-setting-icon"><Icon name="trash" size={17} /></i><span><strong>Delete all local data</strong><small>Removes {data.subjects.length} subjects and every task from this device</small></span></span><b>›</b></summary>
                 <div className="setting-content"><button className="danger-button icon-button" onClick={() => setConfirmDelete(true)}><Icon name="trash" size={15} /> Review deletion</button></div>
               </details>
-              <button className="settings-link" onClick={() => setView("about")}><span><Icon name="about" /><span><strong>About AnoSked?</strong><small>Privacy, Terms, and how local storage works</small></span></span><b>›</b></button>
+              <button className="settings-link" onClick={() => setView("about")}><span className="setting-summary-main"><i><Icon name="about" size={17} /></i><span><strong>About AnoSked?</strong><small>Privacy, Terms, and how local storage works</small></span></span><b>›</b></button>
             </div>
             <div className="local-disclosure"><Icon name="about" size={17} /><div><strong>Stored only on this device</strong><span>AnoSked collects nothing. Deleting the app or clearing browser data removes this schedule unless you export a backup.</span></div></div>
           </div>
@@ -982,12 +1071,23 @@ export default function Home() {
           </div>
         </div>
       )}
+      {taskPendingDelete && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setTaskPendingDelete(null); }}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-task-title">
+            <img src="/assets/thinking.png" alt="" />
+            <h2 id="delete-task-title">Delete this task?</h2>
+            <p>“{compactTitle(taskPendingDelete.title, 64)}” will be removed from this device.</p>
+            <div><button className="quiet-button" onClick={() => setTaskPendingDelete(null)}>Keep task</button><button className="confirm-delete" onClick={deleteTask}>Delete task</button></div>
+          </div>
+        </div>
+      )}
       {showExportSheet && <ExportDialog onClose={() => setShowExportSheet(false)} onWallpaper={() => { setShowExportSheet(false); drawSchedule("wallpaper"); }} onImage={() => { setShowExportSheet(false); drawSchedule("share"); }} />}
       {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onAdd={addSubject} color={COLORS[data.subjects.length % COLORS.length]} />}
       {showDuePicker && <DueDateDialog value={taskDue} onClose={() => setShowDuePicker(false)} onSelect={(value) => { setTaskDue(value); setShowDuePicker(false); }} />}
       {showReport && <ReportDialog onClose={() => setShowReport(false)} />}
       {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
       {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
+      {showTour && <WelcomeTour onClose={() => { setShowTour(false); setData({ ...data, tourCompleted: true }); }} onNavigate={(nextView) => setView(nextView)} />}
       {!data.consent && <ConsentDialog onAccept={() => setData({ ...data, consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" } })} onPolicy={setPolicy} />}
       {notice && <BrandedToast message={notice} />}
     </main>
@@ -1029,7 +1129,7 @@ function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
       <div className="timetable" aria-label="Weekly class timetable">
         <div className="timetable-header">
           <div className="time-corner" />
-          {DAY_META.map((day) => <div key={day.code}><strong>{day.short}</strong><span>{day.label.slice(0, 3)}</span></div>)}
+          {DAY_META.map((day) => <div key={day.code}><strong>{day.short}</strong></div>)}
         </div>
         <div className="timetable-content">
           <div className="time-axis">
@@ -1076,7 +1176,7 @@ function DayStrip({ selectedDate, onSelect }: { selectedDate: Date; onSelect: (d
   const mondayOffset = (start.getDay() + 6) % 7;
   start.setDate(start.getDate() - mondayOffset);
   const days = Array.from({ length: 7 }, (_, index) => { const date = new Date(start); date.setDate(start.getDate() + index); return date; });
-  return <div className="day-strip" aria-label="Choose a day">{days.map((date) => { const selected = dateKey(date) === dateKey(selectedDate); const today = dateKey(date) === dateKey(new Date()); return <button key={dateKey(date)} className={`${selected ? "selected" : ""} ${today ? "is-today" : ""}`} onClick={() => onSelect(date)}><span>{date.toLocaleDateString("en-PH", { weekday: "short" }).slice(0, 2)}</span><strong>{date.getDate()}</strong><i /></button>; })}</div>;
+  return <div className="day-strip" aria-label="Choose a day">{days.map((date) => { const selected = dateKey(date) === dateKey(selectedDate); const today = dateKey(date) === dateKey(new Date()); return <button key={dateKey(date)} className={`${selected ? "selected" : ""} ${today ? "is-today" : ""}`} onClick={() => onSelect(date)}><span>{date.toLocaleDateString("en-PH", { weekday: "short" })}</span><strong>{date.getDate()}</strong><i /></button>; })}</div>;
 }
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
@@ -1103,9 +1203,20 @@ function DueDateDialog({ value, onClose, onSelect }: { value: string; onClose: (
   const timeOptions = [
     { value: "08:00", label: "8 AM" },
     { value: "12:00", label: "12 PM" },
+    { value: "15:00", label: "3 PM" },
     { value: "17:00", label: "5 PM" },
+    { value: "20:00", label: "8 PM" },
     { value: "23:59", label: "End of day" },
   ];
+  const hour24 = Number(time.slice(0, 2));
+  const minuteValue = time.slice(3, 5);
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+
+  function updateTime(nextHour: number, nextMinute: string, nextPeriod: string) {
+    const normalizedHour = nextPeriod === "PM" ? (nextHour % 12) + 12 : nextHour % 12;
+    setTime(`${String(normalizedHour).padStart(2, "0")}:${nextMinute}`);
+  }
 
   function moveMonth(offset: number) {
     setMonth(new Date(month.getFullYear(), month.getMonth() + offset, 1));
@@ -1116,7 +1227,22 @@ function DueDateDialog({ value, onClose, onSelect }: { value: string; onClose: (
     const key = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const disabled = key < today;
     return <button key={key} className={selected === key ? "selected" : ""} disabled={disabled} onClick={() => setSelected(key)}>{day}</button>;
-  })}</div><span className="field-label due-time-label">Due time</span><div className="due-time-options">{timeOptions.map((option) => <button key={option.value} className={time === option.value ? "selected" : ""} onClick={() => setTime(option.value)}>{option.label}</button>)}</div><button className="sky-button wide-dialog" onClick={() => onSelect(`${selected}T${time}`)}>Use this due date</button></div></div>;
+  })}</div><span className="field-label due-time-label">Due time</span><div className="due-time-options">{timeOptions.map((option) => <button key={option.value} className={time === option.value ? "selected" : ""} onClick={() => setTime(option.value)}>{option.label}</button>)}</div><div className="custom-time-row"><span>Or set any time</span><div><select aria-label="Due hour" value={hour12} onChange={(event) => updateTime(Number(event.target.value), minuteValue, period)}>{Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <option key={hour}>{hour}</option>)}</select><span>:</span><select aria-label="Due minute" value={minuteValue} onChange={(event) => updateTime(hour12, event.target.value, period)}>{Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0")).map((minute) => <option key={minute}>{minute}</option>)}</select><select aria-label="AM or PM" value={period} onChange={(event) => updateTime(hour12, minuteValue, event.target.value)}><option>AM</option><option>PM</option></select></div></div><button className="sky-button wide-dialog" onClick={() => onSelect(`${selected}T${time}`)}>Use this due date</button></div></div>;
+}
+
+function WelcomeTour({ onClose, onNavigate }: { onClose: () => void; onNavigate: (view: View) => void }) {
+  const [step, setStep] = useState(0);
+  const steps: Array<{ title: string; detail: string; image: string; view: View }> = [
+    { title: "Today, without the guessing", detail: "See your first class, room, and full timeline at a glance. Swipe the dates to check another day.", image: "/assets/thinking.png", view: "today" },
+    { title: "Your whole week, clearly", detail: "Switch between day and week views. Save the timetable as an image or iPhone wallpaper anytime.", image: "/assets/studying.png", view: "calendar" },
+    { title: "Deadlines stay with the subject", detail: "Add a task, choose its subject, then use Next class or any custom due time.", image: "/assets/checklist.png", view: "tasks" },
+  ];
+  const current = steps[step];
+  function finish() {
+    onNavigate(current.view);
+    onClose();
+  }
+  return <div className="dialog-backdrop tour-layer" role="presentation"><div className="brand-dialog welcome-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title"><button className="tour-skip" onClick={onClose}>Skip</button><div className="tour-art"><img src={current.image} alt="" /></div><div className="tour-dots" aria-label={`Step ${step + 1} of ${steps.length}`}>{steps.map((item, index) => <i key={item.title} className={index === step ? "active" : ""} />)}</div><h2 id="tour-title">{current.title}</h2><p>{current.detail}</p><div className="tour-actions">{step > 0 ? <button className="quiet-button" onClick={() => setStep(step - 1)}>Back</button> : <span />}{step < steps.length - 1 ? <button className="sky-button" onClick={() => { onNavigate(current.view); setStep(step + 1); }}>Next</button> : <button className="sky-button" onClick={finish}>Show me around</button>}</div></div></div>;
 }
 
 function SubjectDialog({ onClose, onAdd, color }: { onClose: () => void; onAdd: (subject: Subject) => void; color: string }) {
@@ -1149,23 +1275,15 @@ function ReportDialog({ onClose }: { onClose: () => void }) {
   const [detail, setDetail] = useState("");
   const [feedback, setFeedback] = useState("");
 
-  async function prepareReport() {
+  function prepareReport() {
     if (!detail.trim()) { setFeedback("Describe what happened first."); return; }
     const text = `AnoSked? bug report\nCategory: ${category}\nApp version: 1.0\n\n${detail.trim()}`;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: "AnoSked? bug report", text });
-        setFeedback("Report opened in your share sheet.");
-      } else {
-        await navigator.clipboard.writeText(text);
-        setFeedback("Report copied. Send it through your preferred contact app.");
-      }
-    } catch {
-      setFeedback("Sharing was cancelled. Your report stays here.");
-    }
+    const subject = `[AnoSked? ${category}] Bug report`;
+    window.location.href = `mailto:info.keyno@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+    setFeedback("Your email app should open with the report addressed to info.keyno@gmail.com.");
   }
 
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/thinking.png" alt="" /><h2 id="report-title">Report a problem</h2><p>This opens your device’s Share Sheet. You choose Mail, Messages, or another app; AnoSked does not send it to the creator automatically.</p><label>What kind of problem?<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Something looks wrong</option><option>Schedule parsed incorrectly</option><option>A button does not work</option><option>Accessibility problem</option><option>Suggestion</option></select></label><label>What happened?<textarea value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="What did you expect, and what happened instead?" /></label>{feedback && <p className="report-feedback">{feedback}</p>}<button className="sky-button wide-dialog" onClick={prepareReport}>Choose where to share</button></div></div>;
+  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/thinking.png" alt="" /><h2 id="report-title">Report a problem</h2><p>Describe the issue and AnoSked will prepare an email to info.keyno@gmail.com. Nothing is sent until you review and send it.</p><label>What kind of problem?<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Something looks wrong</option><option>Schedule parsed incorrectly</option><option>A button does not work</option><option>Accessibility problem</option><option>Suggestion</option></select></label><label>What happened?<textarea value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="What did you expect, and what happened instead?" /></label>{feedback && <p className="report-feedback">{feedback}</p>}<button className="sky-button wide-dialog" onClick={prepareReport}>Open email report</button></div></div>;
 }
 
 function BrandedToast({ message }: { message: string }) {

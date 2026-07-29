@@ -14,7 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title,
     description,
     manifest: "/manifest.webmanifest",
-    icons: { icon: "/assets/AnoSkedfinallogo.png", shortcut: "/assets/AnoSkedfinallogo.png", apple: "/assets/AnoSkedfinallogo.png" },
+    icons: { icon: "/assets/AnoSkedicon.png", shortcut: "/assets/AnoSkedicon.png", apple: "/assets/AnoSkedicon.png" },
     openGraph: { title, description, type: "website" },
     twitter: { card: "summary", title, description },
   };

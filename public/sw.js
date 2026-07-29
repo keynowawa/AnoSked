@@ -1,5 +1,5 @@
-const CACHE = "anosked-shell-v2";
-const SHELL = ["/", "/manifest.webmanifest", "/assets/AnoSkedfinallogo.png", "/assets/default.png"];
+const CACHE = "anosked-shell-v3";
+const SHELL = ["/", "/manifest.webmanifest", "/assets/AnoSkedicon.png", "/assets/default.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

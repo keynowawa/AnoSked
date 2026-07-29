@@ -27,7 +27,7 @@ test("renders AnoSked metadata and hardened response headers", async () => {
   assert.match(html, /<title>AnoSked\? — A clearer school week<\/title>/i);
   assert.match(html, /Stored only on your device/i);
   assert.match(html, /manifest\.webmanifest/i);
-  assert.match(html, /AnoSkedfinallogo\.png/i);
+  assert.match(html, /AnoSkedicon\.png/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 
