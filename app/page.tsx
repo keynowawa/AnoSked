@@ -140,31 +140,31 @@ function isValidStoredData(value: unknown): value is SkedData {
     && !Number.isNaN(new Date(task.dueAt).getTime()) && typeof task.done === "boolean");
 }
 
-const SAMPLE = `Welcome to Northbridge University
+const SAMPLE = `Welcome to Adamson University
 Subject Enlistment
 1st Semester 2026-2027
-B.S. INFORMATION TECHNOLOGY
-Second Year - 1st Semester
+B.S. COMPUTER SCIENCE
+Fourth Year - 1st Semester
 Enrolled Subjects
-Block No. : IT 201
+Block No. : CS 401
 Section
 Subject
 Units
 51001
-IT210 : WEB SYSTEMS AND TECHNOLOGIES (12001)
-MTh 09:00-10:30 LAB2
+CS421 : SOFTWARE ENGINEERING 2 (12001)
+MTh 09:00-10:30 OZ AVR
 3
 51002
-IT220 : HUMAN COMPUTER INTERACTION (12002)
-TF 10:30-12:00 RM305
+CS450 : MACHINE LEARNING (12002)
+TF 10:30-12:00 SV213
 3
 51003
-MATH210 : DISCRETE MATHEMATICS (12003)
-Wed 13:00-16:00 RM402
+CS470 : CLOUD COMPUTING (12003)
+Wed 13:00-16:00 CS LAB 2
 3
 51004
-HUM120 : ETHICS IN THE DIGITAL WORLD (12004)
-TF 14:00-15:30 RM204
+CS430 : INFORMATION ASSURANCE AND SECURITY (12004)
+TF 14:00-15:30 SV217
 3
 Total Units : 12`;
 
@@ -292,6 +292,7 @@ function playFeedbackTone(kind: "save" | "complete" | "delete" = "save") {
   const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextClass) return;
   const context = new AudioContextClass();
+  if (context.state === "suspended") void context.resume();
   const tones = kind === "complete"
     ? [{ frequency: 523, delay: 0, duration: .14 }, { frequency: 659, delay: .09, duration: .18 }]
     : kind === "delete"
@@ -305,7 +306,7 @@ function playFeedbackTone(kind: "save" | "complete" | "delete" = "save") {
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(tone.frequency, start);
     gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.035, start + .018);
+    gain.gain.exponentialRampToValueAtTime(0.055, start + .018);
     gain.gain.exponentialRampToValueAtTime(0.0001, end);
     oscillator.connect(gain);
     gain.connect(context.destination);
@@ -532,6 +533,7 @@ export default function Home() {
         setTermEnd(`${year}-12-31`);
       }
       setStage("review");
+      playFeedbackTone();
     }
   }
 
@@ -577,6 +579,7 @@ export default function Home() {
     setStage("paste");
     setView("today");
     setShowTour(true);
+    playFeedbackTone("complete");
     setNotice("Your sked is saved on this device.");
   }
 
@@ -683,6 +686,7 @@ export default function Home() {
   function exportBackup() {
     if (!data) return;
     triggerDownload(JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data }, null, 2), "application/json", `AnoSked-Backup-${dateKey(new Date())}.json`);
+    if (data.soundEffects !== false) playFeedbackTone();
     setNotice("Backup downloaded.");
   }
 
@@ -742,10 +746,13 @@ export default function Home() {
     const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//AnoSked//Local Student Calendar//EN", "CALSCALE:GREGORIAN", events, "END:VCALENDAR"].join("\r\n");
     const filename = `AnoSked-${data.semester.replace(/\s+/g, "-")}.ics`;
     const result = await shareOrDownload(new Blob([ics], { type: "text/calendar;charset=utf-8" }), filename, "Add AnoSked? to your calendar");
-    if (result !== "cancelled") setNotice(result === "shared" ? "Choose Calendar from the Share Sheet." : "Calendar file downloaded.");
+    if (result !== "cancelled") {
+      if (data.soundEffects !== false) playFeedbackTone();
+      setNotice(result === "shared" ? "Choose Calendar from the Share Sheet." : "Calendar file downloaded.");
+    }
   }
 
-  function drawSchedule(mode: "share" | "wallpaper") {
+  function drawSchedule(mode: "image" | "wallpaper", action: "save" | "share" = "save") {
     if (!data) return;
     const canvas = document.createElement("canvas");
     canvas.width = mode === "wallpaper" ? 1290 : 1800;
@@ -846,9 +853,17 @@ export default function Home() {
     ctx.font = `700 ${mode === "wallpaper" ? 20 : 24}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.fillText("Made with AnoSked?", width / 2, height - (mode === "wallpaper" ? 86 : 34));
     const filename = `AnoSked-${mode}-${dateKey(new Date())}.png`;
-    void shareOrDownload(canvasBlob(canvas), filename, mode === "wallpaper" ? "AnoSked? iPhone wallpaper" : "AnoSked? weekly timetable").then((result) => {
+    const blob = canvasBlob(canvas);
+    if (action === "save") {
+      triggerDownload(blob, "image/png", filename);
+      if (data.soundEffects !== false) playFeedbackTone();
+      setNotice(mode === "wallpaper" ? "Wallpaper saved to your device." : "PNG image saved to your device.");
+      return;
+    }
+    void shareOrDownload(blob, filename, mode === "wallpaper" ? "AnoSked? iPhone wallpaper" : "AnoSked? weekly timetable").then((result) => {
       if (result === "cancelled") return;
-      setNotice(result === "shared" ? "Image opened in the Share Sheet." : mode === "wallpaper" ? "Wallpaper downloaded." : "Schedule image downloaded.");
+      if (data.soundEffects !== false) playFeedbackTone();
+      setNotice(result === "shared" ? "Image opened in the Share Sheet." : "Sharing is unavailable, so the PNG was saved instead.");
     });
   }
 
@@ -866,7 +881,7 @@ export default function Home() {
           <div className="intro-copy">
             <img className="hero-mascot" src="/assets/default.png" alt="AnoSked carabao mascot" />
             <h1>Your week,<br />minus the chaos.</h1>
-            <p>Turn enrolled subjects into a clear calendar, room guide, and task list. No spreadsheet energy required.</p>
+            <p>Paste your enrolled subjects once. Get a readable week with every class, room, and task in the right place.</p>
             <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><a href="#import">Set up my schedule</a></div>
             <div className="mini-week" aria-label="Sample weekly timetable">
               <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
@@ -910,7 +925,7 @@ export default function Home() {
                       <div className="review-fields">
                         <div className="inline-fields"><label className="subject-code-input"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><i style={{ background: subject.color }} /></label><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
                         <div className="schedule-edit"><span className="meeting-days">{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={subject.meeting.start} onChange={(e) => updateParsedSubject(subject.id, "start", e.target.value)} aria-label="Start time" /></label><label>Ends<input type="time" value={subject.meeting.end} onChange={(e) => updateParsedSubject(subject.id, "end", e.target.value)} aria-label="End time" /></label><label>Room<input value={subject.meeting.room} onChange={(e) => updateParsedSubject(subject.id, "room", e.target.value)} aria-label="Room" /></label></div>
-                        <div className="review-customize"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div>
+                        <details className="review-customize"><summary><span>Customize</span><span className="review-look-preview"><Icon name={subject.icon || subjectIcon(subject)} size={14} /><i style={{ background: subject.color }} /><b>›</b></span></summary><div className="review-customize-panel"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div></details>
                       </div>
                       <button className="remove-button" onClick={() => removeParsedSubject(subject.id)} aria-label={`Remove ${subject.code}`}>×</button>
                     </div>
@@ -967,7 +982,7 @@ export default function Home() {
             <div className="today-layout">
               <div className="timeline-card">
                 <div className="section-heading"><h2>Timeline</h2><span>{DAY_META.find((day) => day.code === dayCode)?.label}</span></div>
-                {!daySubjects.length ? <EmptyState title="Walang klase today" detail="Take it easy. Swipe to another day when you want to check the rest of your week." /> : daySubjects.map((subject) => {
+                {!daySubjects.length ? <EmptyState title={selectedIsToday ? "Walang klase today" : `No classes on ${selectedWeekday}`} detail={selectedIsToday ? "Take it easy. Swipe to another day when you want to check the rest of your week." : `Nothing is scheduled for ${selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}. Swipe to check another day.`} /> : daySubjects.map((subject) => {
                   const now = clock;
                   const isToday = dateKey(now) === dateKey(selectedDate);
                   const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -986,7 +1001,7 @@ export default function Home() {
                 })}
               </div>
               <aside className="today-side">
-                <div className="side-card"><div className="section-heading"><h2>Due today</h2><button onClick={() => setView("tasks")}>View all</button></div>{todayTasks.length ? todayTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`side-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{subject?.title} · {new Date(task.dueAt).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="All clear" detail="Nothing is due today." />}</div>
+                <div className="side-card"><div className="section-heading"><h2>{selectedIsToday ? "Due today" : `Due ${selectedWeekday}`}</h2><button onClick={() => setView("tasks")}>View all</button></div>{todayTasks.length ? todayTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`side-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{subject?.title} · {new Date(task.dueAt).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="All clear" detail={selectedIsToday ? "Nothing is due today." : "Nothing is due on this day."} />}</div>
               </aside>
             </div>
           </div>
@@ -1062,8 +1077,8 @@ export default function Home() {
                 <div className="setting-content settings-form"><label>Export heading<input value={data.exportTitle || ""} onChange={(e) => setData({ ...data, exportTitle: e.target.value })} placeholder="My week" /></label><label>Name or nickname<input value={data.profile.nickname} onChange={(e) => setData({ ...data, profile: { ...data.profile, nickname: e.target.value } })} placeholder="Optional" /></label><label>Program<input value={data.profile.program} onChange={(e) => setData({ ...data, profile: { ...data.profile, program: e.target.value } })} placeholder="Optional" /></label><label>Year level<input value={data.profile.yearLevel} onChange={(e) => setData({ ...data, profile: { ...data.profile, yearLevel: e.target.value } })} placeholder="Optional" /></label><p className="autosave-note">Changes save automatically on this device.</p></div>
               </details>
               <details>
-                <summary><span className="setting-summary-main"><i><Icon name="sound" size={17} /></i><span><strong>In-app sounds</strong><small>{data.soundEffects !== false ? "On for task changes" : "Off"}</small></span></span><b>›</b></summary>
-                <div className="setting-content sound-setting"><div><strong>Gentle feedback sounds</strong><p>Plays when you add, finish, or delete a task while AnoSked is open. Your phone controls system notification sounds.</p></div><button className={`switch-control ${data.soundEffects !== false ? "on" : ""}`} role="switch" aria-checked={data.soundEffects !== false} onClick={() => { const enabled = data.soundEffects === false; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div>
+                <summary><span className="setting-summary-main"><i><Icon name="sound" size={17} /></i><span><strong>In-app sounds</strong><small>{data.soundEffects !== false ? "On for helpful confirmations" : "Off"}</small></span></span><b>›</b></summary>
+                <div className="setting-content sound-setting"><div className="sound-setting-copy"><strong>Gentle feedback sounds</strong><p>Hear a short confirmation after schedule setup, task changes, class additions, backups, and exports. Navigation stays quiet.</p></div><div className="sound-setting-controls"><button className="quiet-button" onClick={() => playFeedbackTone("complete")}>Play sample</button><button className={`switch-control ${data.soundEffects !== false ? "on" : ""}`} role="switch" aria-label="In-app sounds" aria-checked={data.soundEffects !== false} onClick={() => { const enabled = data.soundEffects === false; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div></div>
               </details>
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="calendarAdd" size={17} /></i><span><strong>Class reminders</strong><small>Use dependable Apple or Google Calendar alerts</small></span></span><b>›</b></summary>
@@ -1118,7 +1133,7 @@ export default function Home() {
           </div>
         </div>
       )}
-      {showExportSheet && <ExportDialog onClose={() => setShowExportSheet(false)} onWallpaper={() => { setShowExportSheet(false); drawSchedule("wallpaper"); }} onImage={() => { setShowExportSheet(false); drawSchedule("share"); }} />}
+      {showExportSheet && <ExportDialog onClose={() => setShowExportSheet(false)} onWallpaper={() => { setShowExportSheet(false); drawSchedule("wallpaper", "save"); }} onImage={() => { setShowExportSheet(false); drawSchedule("image", "save"); }} onShare={() => { setShowExportSheet(false); drawSchedule("image", "share"); }} />}
       {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onAdd={addSubject} color={COLORS[data.subjects.length % COLORS.length]} />}
       {showDuePicker && <DueDateDialog value={taskDue} onClose={() => setShowDuePicker(false)} onSelect={(value) => { setTaskDue(value); setShowDuePicker(false); }} />}
       {showReport && <ReportDialog onClose={() => setShowReport(false)} />}
@@ -1335,8 +1350,8 @@ function InstallDialog({ onClose }: { onClose: () => void }) {
   return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog install-dialog" role="dialog" aria-modal="true" aria-labelledby="install-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.png" alt="" /><h2 id="install-title">Add AnoSked? to your Home Screen</h2><div className="install-steps"><div><b>iPhone or iPad</b><span>Open the Share menu, choose “Add to Home Screen,” then tap Add.</span></div><div><b>Android</b><span>Open your browser menu and choose “Install app” or “Add to Home screen.”</span></div></div><button className="sky-button wide-dialog" onClick={onClose}>Got it</button></div></div>;
 }
 
-function ExportDialog({ onClose, onWallpaper, onImage }: { onClose: () => void; onWallpaper: () => void; onImage: () => void }) {
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.png" alt="" /><h2 id="export-title">Save your weekly timetable</h2><p>Choose a layout. Both use the same Monday–Sunday grid shown in Calendar.</p><div className="export-choices"><button onClick={onWallpaper}><Icon name="today" /><span><strong>iPhone wallpaper</strong><small>Schedule starts lower, leaving room for the Lock Screen clock and widgets</small></span></button><button onClick={onImage}><Icon name="image" /><span><strong>PNG image</strong><small>Easy to share or keep in Photos</small></span></button></div></div></div>;
+function ExportDialog({ onClose, onWallpaper, onImage, onShare }: { onClose: () => void; onWallpaper: () => void; onImage: () => void; onShare: () => void }) {
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.png" alt="" /><h2 id="export-title">Save your weekly timetable</h2><p>Save a file directly to your device, or open the separate sharing option.</p><div className="export-choices"><button onClick={onWallpaper}><Icon name="today" /><span><strong>Save iPhone wallpaper</strong><small>Leaves room for the Lock Screen clock and widgets</small></span></button><button onClick={onImage}><Icon name="image" /><span><strong>Save PNG image</strong><small>Downloads the weekly timetable to this device</small></span></button><button className="share-export-choice" onClick={onShare}><Icon name="install" /><span><strong>Share PNG image</strong><small>Opens the Share Sheet when your device supports it</small></span></button></div></div></div>;
 }
 
 function PolicyDialog({ type, onClose }: { type: "privacy" | "terms"; onClose: () => void }) {
