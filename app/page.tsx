@@ -20,6 +20,7 @@ type Subject = {
   title: string;
   units: number;
   color: string;
+  icon?: IconName;
   meeting: Meeting;
 };
 
@@ -44,6 +45,7 @@ type SkedData = {
   termStart: string;
   termEnd: string;
   profile: Profile;
+  exportTitle?: string;
   subjects: Subject[];
   tasks: Task[];
   createdAt: string;
@@ -73,7 +75,7 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance";
+type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "backup" | "profile" | "trash";
 
 const STORAGE_KEY = "anosked.local.v1";
 const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#3486A8", "#6B8EBD"];
@@ -91,6 +93,13 @@ const PRIMARY_NAV: Array<{ key: View; label: string; icon: IconName }> = [
   { key: "calendar", label: "Calendar", icon: "calendar" },
   { key: "tasks", label: "Tasks", icon: "tasks" },
   { key: "subjects", label: "Subjects", icon: "subjects" },
+];
+const SUBJECT_ICONS: Array<{ icon: IconName; label: string }> = [
+  { icon: "book", label: "Book" },
+  { icon: "flask", label: "Research" },
+  { icon: "cpu", label: "Technology" },
+  { icon: "key", label: "Security" },
+  { icon: "balance", label: "Humanities" },
 ];
 
 const SAMPLE = `Welcome to Adamson University
@@ -229,8 +238,11 @@ function dateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function formatDate(date: Date) {
-  return new Intl.DateTimeFormat("en-PH", { weekday: "long", month: "long", day: "numeric" }).format(date);
+function greeting(date = new Date()) {
+  const hour = date.getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 function getSelectedDay(date: Date): DayCode {
@@ -262,6 +274,7 @@ function triggerDownload(content: BlobPart, type: string, filename: string) {
 }
 
 function subjectIcon(subject: Subject): IconName {
+  if (subject.icon) return subject.icon;
   const name = `${subject.code} ${subject.title}`.toLowerCase();
   if (/research|thesis|project/.test(name)) return "flask";
   if (/crypto|security|coding theory/.test(name)) return "key";
@@ -282,6 +295,9 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   if (name === "image") return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="9" cy="9" r="2" /><path d="m5 17 4-4 3 3 2-2 5 4" /></svg>;
   if (name === "calendarAdd") return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M8 3v4M16 3v4M3 10h18M12 13v5M9.5 15.5h5" /></svg>;
   if (name === "jump") return <svg {...common}><path d="M12 4v13m0 0 5-5m-5 5-5-5M6 21h12" /></svg>;
+  if (name === "backup") return <svg {...common}><path d="M12 4v10m0-10L8 8m4-4 4 4" /><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg>;
+  if (name === "profile") return <svg {...common}><circle cx="12" cy="8" r="4" /><path d="M5 21a7 7 0 0 1 14 0" /></svg>;
+  if (name === "trash") return <svg {...common}><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></svg>;
   if (name === "flask") return <svg {...common}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M8 15h8" /></svg>;
   if (name === "key") return <svg {...common}><circle cx="8" cy="12" r="4" /><path d="M12 12h9M17 12v3M20 12v2" /></svg>;
   if (name === "cpu") return <svg {...common}><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M17 9h4M3 15h4M17 15h4" /></svg>;
@@ -308,6 +324,8 @@ export default function Home() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showExportSheet, setShowExportSheet] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [showSubjectForm, setShowSubjectForm] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [policy, setPolicy] = useState<"privacy" | "terms" | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
@@ -360,6 +378,12 @@ export default function Home() {
     const key = dateKey(selectedDate);
     return data.tasks.filter((task) => task.dueAt.slice(0, 10) === key);
   }, [data, selectedDate]);
+  const selectedIsToday = dateKey(selectedDate) === dateKey(new Date());
+  const selectedWeekday = selectedDate.toLocaleDateString("en-PH", { weekday: "long" });
+  const firstDaySubject = daySubjects[0];
+  const dashboardSummary = firstDaySubject
+    ? `You have ${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}. First up is ${firstDaySubject.title} at ${formatTime(firstDaySubject.meeting.start).replace(":00", "")} in ${firstDaySubject.meeting.room}.`
+    : "Your schedule is clear. Use Calendar when you want to look ahead.";
 
   function runParser() {
     const response = parseEnrollment(paste);
@@ -409,6 +433,7 @@ export default function Home() {
       termStart,
       termEnd,
       profile,
+      exportTitle: "My week",
       subjects: parsed.subjects,
       tasks: [],
       createdAt: new Date().toISOString(),
@@ -440,6 +465,18 @@ export default function Home() {
         return { ...subject, [field]: value };
       }),
     });
+  }
+
+  function updateParsedSubjectIcon(id: string, icon: IconName) {
+    if (!parsed) return;
+    setParsed({ ...parsed, subjects: parsed.subjects.map((subject) => subject.id === id ? { ...subject, icon } : subject) });
+  }
+
+  function addSubject(subject: Subject) {
+    if (!data) return;
+    setData({ ...data, subjects: [...data.subjects, subject], totalUnits: data.totalUnits + subject.units });
+    setShowSubjectForm(false);
+    setNotice(`${subject.title} was added.`);
   }
 
   function createTask() {
@@ -543,20 +580,25 @@ export default function Home() {
     const top = mode === "wallpaper" ? 680 : 210;
     const bottom = mode === "wallpaper" ? 180 : 90;
     const timeWidth = mode === "wallpaper" ? 78 : 105;
-    const days = DAY_META;
+    const days = DAY_META.filter((day) => data.subjects.some((subject) => subject.meeting.days.includes(day.code)));
+    const starts = data.subjects.map((subject) => { const [hour, minute] = subject.meeting.start.split(":").map(Number); return hour * 60 + minute; });
+    const ends = data.subjects.map((subject) => { const [hour, minute] = subject.meeting.end.split(":").map(Number); return hour * 60 + minute; });
+    const firstHour = Math.floor(Math.min(...starts) / 60);
+    const lastHour = Math.ceil(Math.max(...ends) / 60);
+    const hourSpan = Math.max(1, lastHour - firstHour);
     const gridLeft = margin + timeWidth;
     const gridWidth = width - gridLeft - margin;
     const headerHeight = mode === "wallpaper" ? 70 : 76;
     const gridTop = top + headerHeight;
     const gridHeight = height - gridTop - bottom;
-    const hourHeight = gridHeight / 15;
+    const hourHeight = gridHeight / hourSpan;
     const dayWidth = gridWidth / days.length;
 
     ctx.fillStyle = "#EAF6FC";
     ctx.fillRect(0, 0, width, height);
     ctx.fillStyle = "#153A52";
     ctx.font = `700 ${mode === "wallpaper" ? 52 : 62}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(data.profile.nickname ? `${data.profile.nickname}’s week` : "My week", margin, top - 112);
+    ctx.fillText(data.exportTitle?.trim() || (data.profile.nickname ? `${data.profile.nickname}’s week` : "My week"), margin, top - 112);
     ctx.fillStyle = "#56788D";
     ctx.font = `500 ${mode === "wallpaper" ? 24 : 27}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.fillText(`${data.semester}${data.block ? `  ·  ${data.block}` : ""}`, margin, top - 62);
@@ -574,12 +616,19 @@ export default function Home() {
       ctx.fillText(day.short.toUpperCase(), x + dayWidth / 2, top + headerHeight * .62);
     });
 
-    for (let hour = 7; hour <= 22; hour += 1) {
-      const y = gridTop + (hour - 7) * hourHeight;
+    for (let index = 0; index <= days.length; index += 1) {
+      const x = gridLeft + index * dayWidth;
+      ctx.strokeStyle = "rgba(71,128,158,.14)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, top + 14); ctx.lineTo(x, gridTop + gridHeight); ctx.stroke();
+    }
+
+    for (let hour = firstHour; hour <= lastHour; hour += 1) {
+      const y = gridTop + (hour - firstHour) * hourHeight;
       ctx.strokeStyle = "rgba(71,128,158,.16)";
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(margin + 16, y); ctx.lineTo(width - margin - 16, y); ctx.stroke();
-      if (hour < 22) {
+      if (hour < lastHour) {
         ctx.fillStyle = "#6E8796";
         ctx.font = `500 ${mode === "wallpaper" ? 14 : 18}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = "right";
@@ -592,7 +641,7 @@ export default function Home() {
       if (dayIndex < 0) return;
       const [startHour, startMinute] = subject.meeting.start.split(":").map(Number);
       const [endHour, endMinute] = subject.meeting.end.split(":").map(Number);
-      const startOffset = startHour + startMinute / 60 - 7;
+      const startOffset = startHour + startMinute / 60 - firstHour;
       const duration = endHour + endMinute / 60 - (startHour + startMinute / 60);
       const x = gridLeft + dayIndex * dayWidth + 4;
       const y = gridTop + startOffset * hourHeight + 3;
@@ -616,7 +665,7 @@ export default function Home() {
     ctx.textAlign = "left";
     ctx.fillStyle = "#153A52";
     ctx.font = `700 ${mode === "wallpaper" ? 20 : 24}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText("AnoSked", margin, height - (mode === "wallpaper" ? 86 : 34));
+    ctx.fillText("Created in AnoSked?", margin, height - (mode === "wallpaper" ? 86 : 34));
     canvas.toBlob((blob) => {
       if (!blob) return;
       triggerDownload(blob, "image/png", `AnoSked-${mode}-${dateKey(new Date())}.png`);
@@ -682,7 +731,8 @@ export default function Home() {
                       <div className="subject-color" style={{ background: subject.color }} />
                       <div className="review-fields">
                         <div className="inline-fields"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
-                        <div className="schedule-edit"><span>{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><input type="time" value={subject.meeting.start} onChange={(e) => updateParsedSubject(subject.id, "start", e.target.value)} aria-label="Start time" /><span>to</span><input type="time" value={subject.meeting.end} onChange={(e) => updateParsedSubject(subject.id, "end", e.target.value)} aria-label="End time" /><input value={subject.meeting.room} onChange={(e) => updateParsedSubject(subject.id, "room", e.target.value)} aria-label="Room" /></div>
+                        <div className="schedule-edit"><span className="meeting-days">{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={subject.meeting.start} onChange={(e) => updateParsedSubject(subject.id, "start", e.target.value)} aria-label="Start time" /></label><label>Ends<input type="time" value={subject.meeting.end} onChange={(e) => updateParsedSubject(subject.id, "end", e.target.value)} aria-label="End time" /></label><label>Room<input value={subject.meeting.room} onChange={(e) => updateParsedSubject(subject.id, "room", e.target.value)} aria-label="Room" /></label></div>
+                        <IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact />
                       </div>
                       <button className="remove-button" onClick={() => removeParsedSubject(subject.id)} aria-label={`Remove ${subject.code}`}>×</button>
                     </div>
@@ -702,7 +752,7 @@ export default function Home() {
             ) : null}
           </div>
         </section>
-        <footer className="public-footer"><span>© 2026 AnoSked? · Made for calmer school days.</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button><button onClick={() => setShowInstallGuide(true)}>Install help</button></nav></footer>
+        <footer className="public-footer"><span>© 2026 AnoSked? · Created by Kyann Tagle</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button><button onClick={() => setShowInstallGuide(true)}>Install help</button></nav></footer>
         {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
         {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
         {notice && <BrandedToast message={notice} />}
@@ -730,9 +780,9 @@ export default function Home() {
 
         {view === "today" && (
           <div className="page today-page">
-            <div className="page-title-row">
-              <div><h1>{formatDate(selectedDate)}</h1><p>{daySubjects.length ? `${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}` : "No classes"}</p></div>
-              <button className="date-button" onClick={() => setSelectedDate(new Date())}>Today</button>
+            <div className="page-title-row mascot-title dashboard-title">
+              <div><span className="dashboard-greeting">{greeting()}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `You’re viewing ${selectedWeekday}.`}</h1><p><strong>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</strong> · {dashboardSummary}</p></div>
+              <div className="dashboard-title-side"><img src="/assets/thinking.png" alt="AnoSked thinking" /><button className="date-button" onClick={() => setSelectedDate(new Date())}>Today</button></div>
             </div>
             <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
             <div className="today-layout">
@@ -800,7 +850,7 @@ export default function Home() {
           <div className="page tasks-page">
             <div className="page-title-row mascot-title"><div><h1>Tasks</h1><p>{data.tasks.filter((task) => !task.done).length} open · Keep each deadline connected to its subject.</p></div><img src="/assets/studying.png" alt="AnoSked studying" /></div>
             <div className="tasks-layout">
-              <div className="task-composer"><h2>New task</h2><label>Task title<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} aria-label="Task title" /></label><label>Subject<select value={taskSubject} onChange={(e) => setTaskSubject(e.target.value)}><option value="">Choose a subject</option>{data.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.title} — {subject.code}</option>)}</select></label><label>Due date<input type="datetime-local" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} /></label><div className="quick-dates"><button onClick={setDueNextClass}>Next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>In 7 days</button></div><button className="primary-button wide" onClick={createTask}>Add task</button></div>
+              <div className="task-composer"><div className="composer-heading"><h2>New task</h2><p>Three quick choices, then you’re done.</p></div><label className="task-title-field">Task title<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} aria-label="Task title" /></label><div className="task-field-group"><span className="field-label">Subject</span><div className="task-subject-choices">{data.subjects.map((subject) => <button key={subject.id} className={taskSubject === subject.id ? "selected" : ""} onClick={() => setTaskSubject(subject.id)}><span style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={15} /></span><b>{subject.title}</b><small>{subject.code}</small></button>)}</div></div><div className="task-field-group"><span className="field-label">When is it due?</span><div className="quick-dates"><button onClick={setDueNextClass}>Next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>In 7 days</button></div><label className="custom-due">Or choose a date<input type="datetime-local" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} /></label></div><button className="primary-button wide" onClick={createTask}>Add task</button></div>
               <div className="task-list-card"><div className="section-heading"><h2>Your tasks</h2><span>{data.tasks.filter((task) => !task.done).length} open</span></div>{data.tasks.length ? [...data.tasks].sort((a, b) => a.dueAt.localeCompare(b.dueAt)).map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`task-row ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span className="task-check">{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p><b style={{ color: subject?.color }}>{subject?.title}</b> · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="No tasks yet" detail="Add one when something comes up." />}</div>
             </div>
           </div>
@@ -808,7 +858,7 @@ export default function Home() {
 
         {view === "subjects" && (
           <div className="page">
-            <div className="page-title-row"><div><h1>Subjects</h1><p>{data.subjects.length} subjects · {data.totalUnits} units · Rooms and schedules in one place.</p></div></div>
+            <div className="page-title-row"><div><h1>Subjects</h1><p>{data.subjects.length} subjects · {data.totalUnits} units · Rooms and schedules in one place.</p></div><button className="sky-button icon-button" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={16} /> Add class or activity</button></div>
             <div className="subject-grid">{data.subjects.map((subject) => <article className="subject-card" key={subject.id}><div className="subject-card-top"><span className="subject-bubble" style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={21} /></span><span className="unit-pill">{subject.units} units</span></div><h2>{subject.title}</h2><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span><div className="subject-detail"><span>{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><strong>{formatTime(subject.meeting.start)}–{formatTime(subject.meeting.end)}</strong></div><div className="subject-room"><span>Room</span><strong>{subject.meeting.room}</strong></div><div className="subject-task-count">{data.tasks.filter((task) => task.subjectId === subject.id && !task.done).length} open tasks</div></article>)}</div>
           </div>
         )}
@@ -819,16 +869,20 @@ export default function Home() {
             <div className="settings-panel">
               <div className="local-disclosure"><strong>Local storage</strong><span>AnoSked collects nothing. Delete the app or clear browser data and this schedule is gone.</span></div>
               <details open>
-                <summary><span><strong>Backup</strong><small>Move or protect your schedule</small></span><b>›</b></summary>
+                <summary><span className="setting-summary-main"><i><Icon name="backup" size={17} /></i><span><strong>Backup</strong><small>Move or protect your schedule</small></span></span><b>›</b></summary>
                 <div className="setting-content"><button className="sky-button" onClick={exportBackup}>Export backup</button><button className="quiet-button" onClick={() => fileInput.current?.click()}>Restore</button><input ref={fileInput} type="file" accept="application/json,.json" onChange={restoreBackup} hidden /></div>
               </details>
               <details>
-                <summary><span><strong>Profile</strong><small>Optional labels for exports</small></span><b>›</b></summary>
-                <div className="setting-content settings-form"><label>Name or nickname<input value={data.profile.nickname} onChange={(e) => setData({ ...data, profile: { ...data.profile, nickname: e.target.value } })} placeholder="Optional" /></label><label>Program<input value={data.profile.program} onChange={(e) => setData({ ...data, profile: { ...data.profile, program: e.target.value } })} placeholder="Optional" /></label><label>Year level<input value={data.profile.yearLevel} onChange={(e) => setData({ ...data, profile: { ...data.profile, yearLevel: e.target.value } })} placeholder="Optional" /></label></div>
+                <summary><span className="setting-summary-main"><i><Icon name="profile" size={17} /></i><span><strong>Profile and exports</strong><small>Customize names and image headings</small></span></span><b>›</b></summary>
+                <div className="setting-content settings-form"><label>Export heading<input value={data.exportTitle || ""} onChange={(e) => setData({ ...data, exportTitle: e.target.value })} placeholder="My week" /></label><label>Name or nickname<input value={data.profile.nickname} onChange={(e) => setData({ ...data, profile: { ...data.profile, nickname: e.target.value } })} placeholder="Optional" /></label><label>Program<input value={data.profile.program} onChange={(e) => setData({ ...data, profile: { ...data.profile, program: e.target.value } })} placeholder="Optional" /></label><label>Year level<input value={data.profile.yearLevel} onChange={(e) => setData({ ...data, profile: { ...data.profile, yearLevel: e.target.value } })} placeholder="Optional" /></label></div>
               </details>
               <details>
-                <summary><span><strong>Schedule</strong><small>{data.subjects.length} subjects · {data.semester}</small></span><b>›</b></summary>
-                <div className="setting-content"><button className="danger-button" onClick={() => setConfirmDelete(true)}>Delete local data</button></div>
+                <summary><span className="setting-summary-main"><i><Icon name="calendarAdd" size={17} /></i><span><strong>Class reminders</strong><small>Use dependable Apple or Google Calendar alerts</small></span></span><b>›</b></summary>
+                <div className="setting-content reminder-setting"><p>System Web Push needs a future notification service. For now, export recurring classes with 15-minute calendar alerts.</p><button className="sky-button icon-button" onClick={exportICS}><Icon name="calendarAdd" size={15} /> Add to calendar</button></div>
+              </details>
+              <details>
+                <summary><span className="setting-summary-main"><i className="danger-setting-icon"><Icon name="trash" size={17} /></i><span><strong>Delete all local data</strong><small>Removes {data.subjects.length} subjects and every task from this device</small></span></span><b>›</b></summary>
+                <div className="setting-content"><button className="danger-button" onClick={() => setConfirmDelete(true)}>Review deletion</button></div>
               </details>
               <button className="settings-link" onClick={() => setView("about")}><span><Icon name="about" /><span><strong>About AnoSked?</strong><small>Privacy, Terms, and how local storage works</small></span></span><b>›</b></button>
             </div>
@@ -843,20 +897,21 @@ export default function Home() {
               <section><h2>Keep your official record close</h2><p>AnoSked helps you read and remember your schedule, but your school’s official portal remains the source of truth.</p><button onClick={() => setPolicy("terms")}>Read Terms</button></section>
               <section><h2>Install when you’re ready</h2><p>Add AnoSked to your Home Screen for a full-screen, app-like experience on supported phones and tablets.</p><button onClick={requestInstall}><Icon name="install" size={15} /> Install AnoSked?</button></section>
               <section><h2>Your consent</h2><p>Privacy Notice and Terms accepted {data.consent?.acceptedAt ? new Date(data.consent.acceptedAt).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }) : "on this device"}.</p></section>
+              <section><h2>Found something off?</h2><p>Prepare a privacy-safe bug report and share it through any app you choose. AnoSked sends nothing automatically.</p><button onClick={() => setShowReport(true)}>Prepare bug report</button></section>
             </div>
-            <footer className="about-footer">AnoSked? · Version 1.0 · Not affiliated with any university.</footer>
+            <footer className="about-footer">AnoSked? · Version 1.0 · Created by Kyann Tagle · Not affiliated with any university.</footer>
           </div>
         )}
       </section>
 
       <nav className="mobile-nav">
         {PRIMARY_NAV.map(({ key, label, icon }) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><Icon name={icon} size={18} /><span>{label}</span></button>)}
-        <button className={view === "settings" || view === "about" ? "active" : ""} onClick={() => setView("settings")}><Icon name="settings" size={18} /><span>More</span></button>
+        <button className={view === "settings" || view === "about" ? "active" : ""} onClick={() => setView("settings")}><Icon name="settings" size={18} /><span>Settings</span></button>
       </nav>
       {confirmDelete && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmDelete(false); }}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
-            <img src="/assets/AnoSkedlogo.png" alt="" />
+            <img src="/assets/thinking.png" alt="" />
             <h2 id="delete-title">Delete this schedule?</h2>
             <p>Subjects and tasks will be removed from this device. A backup is the only way to restore them.</p>
             <div><button className="quiet-button" onClick={() => setConfirmDelete(false)}>Cancel</button><button className="confirm-delete" onClick={() => { setConfirmDelete(false); setData(null); setStage("paste"); }}>Delete</button></div>
@@ -864,6 +919,8 @@ export default function Home() {
         </div>
       )}
       {showExportSheet && <ExportDialog onClose={() => setShowExportSheet(false)} onWallpaper={() => { setShowExportSheet(false); drawSchedule("wallpaper"); }} onImage={() => { setShowExportSheet(false); drawSchedule("share"); }} />}
+      {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onAdd={addSubject} color={COLORS[data.subjects.length % COLORS.length]} />}
+      {showReport && <ReportDialog onClose={() => setShowReport(false)} />}
       {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
       {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
       {!data.consent && <ConsentDialog onAccept={() => setData({ ...data, consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" } })} onPolicy={setPolicy} />}
@@ -881,6 +938,8 @@ function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
   const events = subjects.flatMap((subject) => subject.meeting.days.map((day) => ({ subject, day })));
   const earliest = [...subjects].sort((a, b) => a.meeting.start.localeCompare(b.meeting.start))[0];
   const jumpKey = earliest ? `${earliest.id}-${earliest.meeting.days[0]}` : "";
+  const earliestHour = earliest ? Number(earliest.meeting.start.split(":")[0]) : 0;
+  const shouldShowJump = earliestHour >= 12;
 
   function jumpToClasses() {
     timetableRef.current?.querySelector(".jump-target")?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -888,7 +947,7 @@ function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
 
   return (
     <div className="weekly-view">
-      <div className="timetable-intro"><div><strong>Your weekly timetable</strong><span>{earliest ? `First class begins at ${formatTime(earliest.meeting.start).replace(":00", "")}.` : "No classes scheduled."}</span></div>{earliest && <button onClick={jumpToClasses}><Icon name="jump" size={16} /> Jump to {formatTime(earliest.meeting.start).replace(":00", "")}</button>}</div>
+      <div className="timetable-intro"><div><strong>Your weekly timetable</strong><span>{earliest ? `First class begins at ${formatTime(earliest.meeting.start).replace(":00", "")}.` : "No classes scheduled."}</span></div>{shouldShowJump && <button className="jump-to-classes" onClick={jumpToClasses}><Icon name="jump" size={16} /> Jump to {formatTime(earliest.meeting.start).replace(":00", "")}</button>}</div>
       <div className="timetable-shell" ref={timetableRef}>
       <div className="timetable" aria-label="Weekly class timetable">
         <div className="timetable-header">
@@ -945,6 +1004,59 @@ function DayStrip({ selectedDate, onSelect }: { selectedDate: Date; onSelect: (d
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
   return <div className="empty-state"><img src="/assets/noclass.png" alt="" /><h3>{title}</h3><p>{detail}</p></div>;
+}
+
+function IconPicker({ value, onChange, compact = false }: { value: IconName; onChange: (icon: IconName) => void; compact?: boolean }) {
+  return <div className={`icon-picker ${compact ? "compact" : ""}`}><span>{compact ? "Icon" : "Choose an icon"}</span><div>{SUBJECT_ICONS.map(({ icon, label }) => <button type="button" key={icon} className={value === icon ? "selected" : ""} onClick={() => onChange(icon)} aria-label={label} title={label}><Icon name={icon} size={compact ? 14 : 18} /></button>)}</div></div>;
+}
+
+function SubjectDialog({ onClose, onAdd, color }: { onClose: () => void; onAdd: (subject: Subject) => void; color: string }) {
+  const [title, setTitle] = useState("");
+  const [code, setCode] = useState("");
+  const [room, setRoom] = useState("");
+  const [start, setStart] = useState("08:00");
+  const [end, setEnd] = useState("09:00");
+  const [units, setUnits] = useState("0");
+  const [days, setDays] = useState<DayCode[]>(["MO"]);
+  const [icon, setIcon] = useState<IconName>("book");
+  const [error, setError] = useState("");
+
+  function toggleDay(day: DayCode) {
+    setDays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day]);
+  }
+
+  function submit() {
+    if (!title.trim()) { setError("Add a name for this class or activity."); return; }
+    if (!days.length) { setError("Choose at least one meeting day."); return; }
+    if (!start || !end || end <= start) { setError("The end time must be after the start time."); return; }
+    onAdd({ id: uid("sub"), code: code.trim().toUpperCase() || "ACTIVITY", title: title.trim(), units: Math.max(0, Number(units) || 0), color, icon, meeting: { days, start, end, room: room.trim() || "TBA" } });
+  }
+
+  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog subject-dialog" role="dialog" aria-modal="true" aria-labelledby="subject-dialog-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/studying.png" alt="" /><h2 id="subject-dialog-title">Add a class or activity</h2><p>Use this for an added class, organization work, review session, or recurring commitment.</p><div className="subject-form"><label className="wide-field">Name<input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>Code <small>Optional</small><input value={code} onChange={(event) => setCode(event.target.value)} /></label><label>Room or place <small>Optional</small><input value={room} onChange={(event) => setRoom(event.target.value)} /></label><div className="wide-field day-picker"><span>Meeting days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={days.includes(day.code) ? "selected" : ""} onClick={() => toggleDay(day.code)}>{day.short}</button>)}</div></div><label>Starts<input type="time" value={start} onChange={(event) => setStart(event.target.value)} /></label><label>Ends<input type="time" value={end} onChange={(event) => setEnd(event.target.value)} /></label><label>Units <small>Optional</small><input type="number" min="0" step="1" value={units} onChange={(event) => setUnits(event.target.value)} /></label><div className="wide-field"><IconPicker value={icon} onChange={setIcon} /></div></div>{error && <p className="form-error">{error}</p>}<button className="sky-button wide-dialog" onClick={submit}>Add to my schedule</button></div></div>;
+}
+
+function ReportDialog({ onClose }: { onClose: () => void }) {
+  const [category, setCategory] = useState("Something looks wrong");
+  const [detail, setDetail] = useState("");
+  const [feedback, setFeedback] = useState("");
+
+  async function prepareReport() {
+    if (!detail.trim()) { setFeedback("Describe what happened first."); return; }
+    const text = `AnoSked? bug report\nCategory: ${category}\nApp version: 1.0\n\n${detail.trim()}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "AnoSked? bug report", text });
+        setFeedback("Report opened in your share sheet.");
+      } else {
+        await navigator.clipboard.writeText(text);
+        setFeedback("Report copied. Send it through your preferred contact app.");
+      }
+    } catch {
+      setFeedback("Sharing was cancelled. Your report stays here.");
+    }
+  }
+
+  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/thinking.png" alt="" /><h2 id="report-title">Report a problem</h2><p>Nothing is sent automatically. You choose where the finished report goes.</p><label>What kind of problem?<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Something looks wrong</option><option>Schedule parsed incorrectly</option><option>A button does not work</option><option>Accessibility problem</option><option>Suggestion</option></select></label><label>What happened?<textarea value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="What did you expect, and what happened instead?" /></label>{feedback && <p className="report-feedback">{feedback}</p>}<button className="sky-button wide-dialog" onClick={prepareReport}>Share report</button></div></div>;
 }
 
 function BrandedToast({ message }: { message: string }) {
