@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 
 type DayCode = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
 
@@ -67,7 +68,7 @@ type ParseResult = {
 type View = "today" | "calendar" | "tasks" | "subjects" | "settings";
 
 const STORAGE_KEY = "anosked.local.v1";
-const COLORS = ["#7AA9BC", "#C88E64", "#6E927D", "#B59B6A", "#89999D", "#B98278"];
+const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#3486A8", "#6B8EBD"];
 const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number }> = [
   { code: "MO", short: "M", label: "Monday", js: 1 },
   { code: "TU", short: "T", label: "Tuesday", js: 2 },
@@ -130,7 +131,7 @@ function decodeDays(raw: string): DayCode[] {
   return [...new Set(result)];
 }
 
-function parseAdamson(text: string): { result?: ParseResult; issue?: ParseIssue } {
+function parseEnrollment(text: string): { result?: ParseResult; issue?: ParseIssue } {
   const cleaned = text.replace(/\r/g, "").replace(/\u00a0/g, " ").trim();
   if (!cleaned) {
     return { issue: { kind: "empty", title: "Nothing was pasted", detail: "Copy the Enrolled Subjects section from your Subject Enlistment page, then paste it here." } };
@@ -139,26 +140,25 @@ function parseAdamson(text: string): { result?: ParseResult; issue?: ParseIssue 
   const lines = cleaned.split("\n").map((line) => line.trim()).filter(Boolean);
   const lower = cleaned.toLowerCase();
   const blockIndex = lines.findIndex((line) => /^Block\s*No\.?\s*:/i.test(line));
-  const totalIndex = lines.findIndex((line, index) => index > blockIndex && /^Total\s+Units\s*:/i.test(line));
+  const totalIndex = lines.findIndex((line, index) => index > Math.max(blockIndex, -1) && /^Total\s+Units\s*:/i.test(line));
 
-  if (blockIndex < 0) {
+  const firstSubjectIndex = lines.findIndex((line) => /^[A-Z]{2,}\s?\d{2,}[A-Z]?\s*:\s*.+/i.test(line));
+  if (firstSubjectIndex < 0) {
     if (/assessment of fees|tuition fee|total due|schedule of payment/i.test(lower)) {
-      return { issue: { kind: "fees-only", title: "This looks like an assessment of fees", detail: "AnoSked found tuition or payment information, but not the enrolled-subjects table. Copy from Block No. through Total Units." } };
+      return { issue: { kind: "fees-only", title: "This is the fees section", detail: "Copy the enrolled-subjects table instead. It should contain subject codes followed by class days, time, and room." } };
     }
-    return { issue: { kind: "missing-table", title: "We couldn’t find an enrolled-subjects list", detail: "The pasted text needs the Block No., subject codes, class schedules, and Total Units from Subject Enlistment." } };
-  }
-
-  if (totalIndex < 0) {
-    return { issue: { kind: "incomplete", title: "The subject list looks incomplete", detail: "AnoSked found the beginning of the table, but not Total Units. Copy through the Total Units line so every subject can be checked." } };
+    return { issue: { kind: "missing-table", title: "No class schedule was found", detail: "Paste the part that lists each subject code, class days, start and end time, room, and units." } };
   }
 
   const semester = lines.find((line) => /^\d+(?:st|nd|rd|th)\s+Semester\s+\d{4}-\d{4}$/i.test(line)) || "";
   const program = lines.find((line) => /^(?:B\.?S\.?|B\.?A\.?|Bachelor|Master)/i.test(line)) || "";
   const yearLevelLine = lines.find((line) => /(?:First|Second|Third|Fourth|Fifth)\s+Year/i.test(line)) || "";
   const yearLevel = yearLevelLine.match(/(?:First|Second|Third|Fourth|Fifth)\s+Year/i)?.[0] || "";
-  const block = lines[blockIndex].split(":").slice(1).join(":").trim();
-  const declaredUnits = Number(lines[totalIndex].match(/([\d.]+)\s*$/)?.[1] || 0);
-  const body = lines.slice(blockIndex + 1, totalIndex).filter((line) => !/^(Section|Subject|Units)$/i.test(line));
+  const block = blockIndex >= 0 ? lines[blockIndex].split(":").slice(1).join(":").trim() : "";
+  const declaredUnits = totalIndex >= 0 ? Number(lines[totalIndex].match(/([\d.]+)\s*$/)?.[1] || 0) : 0;
+  const bodyStart = blockIndex >= 0 ? blockIndex + 1 : Math.max(0, firstSubjectIndex - 1);
+  const bodyEnd = totalIndex >= 0 ? totalIndex : lines.length;
+  const body = lines.slice(bodyStart, bodyEnd).filter((line) => !/^(Section|Subject|Units)$/i.test(line));
   const subjects: Subject[] = [];
   const warnings: string[] = [];
 
@@ -258,11 +258,13 @@ export default function Home() {
   const [termStart, setTermStart] = useState("");
   const [termEnd, setTermEnd] = useState("");
   const [view, setView] = useState<View>("today");
+  const [calendarMode, setCalendarMode] = useState<"day" | "week">("week");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [taskTitle, setTaskTitle] = useState("");
   const [taskSubject, setTaskSubject] = useState("");
   const [taskDue, setTaskDue] = useState("");
   const [notice, setNotice] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -305,7 +307,7 @@ export default function Home() {
   }, [data, selectedDate]);
 
   function runParser() {
-    const response = parseAdamson(paste);
+    const response = parseEnrollment(paste);
     if (response.issue) {
       setIssue(response.issue);
       setParsed(null);
@@ -460,64 +462,90 @@ export default function Home() {
   function drawSchedule(mode: "share" | "wallpaper") {
     if (!data) return;
     const canvas = document.createElement("canvas");
-    canvas.width = mode === "wallpaper" ? 1290 : 1400;
-    canvas.height = mode === "wallpaper" ? 2796 : 1800;
+    canvas.width = mode === "wallpaper" ? 1290 : 1800;
+    canvas.height = mode === "wallpaper" ? 2796 : 1500;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const width = canvas.width;
     const height = canvas.height;
-    const top = mode === "wallpaper" ? 650 : 170;
-    const margin = mode === "wallpaper" ? 100 : 90;
-    const available = width - margin * 2;
-    const days = DAY_META.slice(0, 6);
+    const margin = mode === "wallpaper" ? 58 : 72;
+    const top = mode === "wallpaper" ? 680 : 210;
+    const bottom = mode === "wallpaper" ? 180 : 90;
+    const timeWidth = mode === "wallpaper" ? 78 : 105;
+    const days = DAY_META;
+    const gridLeft = margin + timeWidth;
+    const gridWidth = width - gridLeft - margin;
+    const headerHeight = mode === "wallpaper" ? 70 : 76;
+    const gridTop = top + headerHeight;
+    const gridHeight = height - gridTop - bottom;
+    const hourHeight = gridHeight / 15;
+    const dayWidth = gridWidth / days.length;
 
-    ctx.fillStyle = "#F6F2EA";
+    ctx.fillStyle = "#EAF6FC";
     ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = "#DDEEF5";
-    ctx.fillRect(0, 0, width, mode === "wallpaper" ? 560 : 120);
-    ctx.fillStyle = "#4A3026";
-    ctx.font = `700 ${mode === "wallpaper" ? 66 : 72}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(data.profile.nickname ? `${data.profile.nickname}’s sked` : "My weekly sked", margin, top - 95);
-    ctx.fillStyle = "#6F797B";
-    ctx.font = `500 ${mode === "wallpaper" ? 30 : 34}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(`${data.semester}${data.block ? `  ·  ${data.block}` : ""}`, margin, top - 38);
+    ctx.fillStyle = "#153A52";
+    ctx.font = `700 ${mode === "wallpaper" ? 52 : 62}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText(data.profile.nickname ? `${data.profile.nickname}’s week` : "My week", margin, top - 112);
+    ctx.fillStyle = "#56788D";
+    ctx.font = `500 ${mode === "wallpaper" ? 24 : 27}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText(`${data.semester}${data.block ? `  ·  ${data.block}` : ""}`, margin, top - 62);
 
-    const dayHeight = mode === "wallpaper" ? 285 : 230;
+    ctx.fillStyle = "rgba(255,255,255,.86)";
+    ctx.beginPath();
+    ctx.roundRect(margin, top, width - margin * 2, height - top - bottom + 16, mode === "wallpaper" ? 30 : 36);
+    ctx.fill();
+
     days.forEach((day, dayIndex) => {
-      const y = top + dayIndex * dayHeight;
-      ctx.fillStyle = "#FFFDF9";
-      ctx.beginPath();
-      ctx.roundRect(margin, y, available, dayHeight - 22, 34);
-      ctx.fill();
-      ctx.fillStyle = "#6F797B";
-      ctx.font = "700 25px -apple-system, BlinkMacSystemFont, sans-serif";
-      ctx.fillText(day.label.toUpperCase(), margin + 34, y + 48);
-      const entries = data.subjects.filter((subject) => subject.meeting.days.includes(day.code)).sort((a, b) => a.meeting.start.localeCompare(b.meeting.start));
-      if (!entries.length) {
-        ctx.fillStyle = "#89999D";
-        ctx.font = "500 30px -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText("No classes", margin + 34, y + 112);
-      }
-      entries.forEach((subject, itemIndex) => {
-        const itemY = y + 86 + itemIndex * 76;
-        ctx.fillStyle = subject.color;
-        ctx.beginPath();
-        ctx.arc(margin + 45, itemY + 25, 9, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#4A3026";
-        ctx.font = "700 31px -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText(subject.code, margin + 72, itemY + 30);
-        ctx.fillStyle = "#6F797B";
-        ctx.font = "500 27px -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText(`${formatTime(subject.meeting.start)}–${formatTime(subject.meeting.end)}  ·  ${subject.meeting.room}`, margin + 255, itemY + 30);
-      });
+      const x = gridLeft + dayIndex * dayWidth;
+      ctx.fillStyle = "#56788D";
+      ctx.font = `700 ${mode === "wallpaper" ? 16 : 20}px -apple-system, BlinkMacSystemFont, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText(day.short.toUpperCase(), x + dayWidth / 2, top + headerHeight * .62);
     });
-    ctx.fillStyle = "#4A3026";
-    ctx.font = "700 28px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText("AnoSked", margin, height - 62);
-    ctx.fillStyle = "#6F797B";
-    ctx.font = "500 24px -apple-system, BlinkMacSystemFont, sans-serif";
-    ctx.fillText("Your schedule stays yours.", margin + 145, height - 62);
+
+    for (let hour = 7; hour <= 22; hour += 1) {
+      const y = gridTop + (hour - 7) * hourHeight;
+      ctx.strokeStyle = "rgba(71,128,158,.16)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(margin + 16, y); ctx.lineTo(width - margin - 16, y); ctx.stroke();
+      if (hour < 22) {
+        ctx.fillStyle = "#6E8796";
+        ctx.font = `500 ${mode === "wallpaper" ? 14 : 18}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.textAlign = "right";
+        ctx.fillText(formatTime(`${String(hour).padStart(2, "0")}:00`).replace(":00", ""), gridLeft - 16, y + 6);
+      }
+    }
+
+    data.subjects.forEach((subject) => subject.meeting.days.forEach((day) => {
+      const dayIndex = days.findIndex((item) => item.code === day);
+      if (dayIndex < 0) return;
+      const [startHour, startMinute] = subject.meeting.start.split(":").map(Number);
+      const [endHour, endMinute] = subject.meeting.end.split(":").map(Number);
+      const startOffset = startHour + startMinute / 60 - 7;
+      const duration = endHour + endMinute / 60 - (startHour + startMinute / 60);
+      const x = gridLeft + dayIndex * dayWidth + 4;
+      const y = gridTop + startOffset * hourHeight + 3;
+      const blockWidth = dayWidth - 8;
+      const blockHeight = Math.max(duration * hourHeight - 6, 34);
+      ctx.globalAlpha = .16;
+      ctx.fillStyle = subject.color;
+      ctx.beginPath(); ctx.roundRect(x, y, blockWidth, blockHeight, 14); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "#153A52";
+      ctx.textAlign = "left";
+      ctx.font = `700 ${mode === "wallpaper" ? 14 : 19}px -apple-system, BlinkMacSystemFont, sans-serif`;
+      ctx.fillText(subject.code, x + 10, y + 23, blockWidth - 18);
+      if (blockHeight > 54) {
+        ctx.fillStyle = "#56788D";
+        ctx.font = `600 ${mode === "wallpaper" ? 11 : 15}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillText(subject.meeting.room, x + 10, y + 43, blockWidth - 18);
+      }
+    }));
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#153A52";
+    ctx.font = `700 ${mode === "wallpaper" ? 20 : 24}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText("AnoSked", margin, height - (mode === "wallpaper" ? 86 : 34));
     canvas.toBlob((blob) => {
       if (!blob) return;
       triggerDownload(blob, "image/png", `AnoSked-${mode}-${dateKey(new Date())}.png`);
@@ -525,28 +553,28 @@ export default function Home() {
     }, "image/png");
   }
 
-  if (!hydrated) return <main className="loading-screen"><div className="brand-mark">A</div><p>Preparing AnoSked…</p></main>;
+  if (!hydrated) return <main className="loading-screen"><Image className="brand-mark" src="/assets/AnoSkedfinallogo.png" alt="" width={62} height={62} priority /><p>Preparing AnoSked…</p></main>;
 
   if (!data) {
     return (
       <main className="onboarding-shell">
         <header className="public-header">
-          <a className="wordmark" href="#top" aria-label="AnoSked home"><span className="brand-mark small">A</span>AnoSked</a>
-          <span className="privacy-pill"><span className="status-dot" /> Local by default</span>
+          <a className="wordmark" href="#top" aria-label="AnoSked home"><Image className="brand-mark small" src="/assets/AnoSkedfinallogo.png" alt="" width={38} height={38} priority />AnoSked</a>
+          <span className="header-note">Private. Offline-ready.</span>
         </header>
 
         <section className="onboarding-grid" id="top">
           <div className="intro-copy">
-            <div className="eyebrow">Adamson subject enlistment, organized</div>
-            <h1>Paste it once.<br />Know what’s next.</h1>
-            <p>AnoSked turns your enrolled subjects into a calm, readable calendar—without an account or uploading your academic data.</p>
-            <div className="promise-row">
-              <span>No sign-up</span><span>No student number</span><span>No fees</span>
-            </div>
-            <div className="mini-schedule" aria-label="Sample AnoSked calendar">
-              <div className="mini-date"><strong>Wednesday</strong><span>2 classes</span></div>
-              <div className="mini-event active"><i style={{ background: "#7AA9BC" }} /><div><strong>CS420</strong><span>6:00–9:00 PM · SV217</span></div><b>Now</b></div>
-              <div className="mini-event"><i style={{ background: "#6E927D" }} /><div><strong>CS467</strong><span>7:30–9:00 PM · SV213</span></div></div>
+            <div className="eyebrow">A clearer school week</div>
+            <h1>Your semester,<br />at a glance.</h1>
+            <p>Paste your enrolled subjects. AnoSked turns them into a timetable you can actually read.</p>
+            <div className="mini-week" aria-label="Sample weekly timetable">
+              <div className="mini-week-head"><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span></div>
+              <div className="mini-week-grid">
+                <div className="mini-block one"><strong>CS420</strong><span>SV217</span></div>
+                <div className="mini-block two"><strong>CS468</strong><span>SV213</span></div>
+                <div className="mini-block three"><strong>CS342</strong><span>SV213</span></div>
+              </div>
             </div>
           </div>
 
@@ -554,26 +582,20 @@ export default function Home() {
             {stage === "paste" ? (
               <>
                 <div className="card-heading">
-                  <span className="step-badge">1</span>
-                  <div><h2>Paste enrolled subjects</h2><p>You may paste the whole page. Only the subject table is kept.</p></div>
+                  <div><h2>Import your schedule</h2><p>Paste the page or just its enrolled-subjects table.</p></div>
                 </div>
-                <textarea value={paste} onChange={(event) => { setPaste(event.target.value); setIssue(null); }} placeholder={`Paste from “Block No.” through “Total Units”`} aria-label="Subject enlistment text" />
+                <textarea value={paste} onChange={(event) => { setPaste(event.target.value); setIssue(null); }} placeholder="Paste your enrolled subjects here…" aria-label="Subject enlistment text" />
                 {issue && (
                   <div className="error-panel" role="alert">
                     <div className="error-icon">!</div>
-                    <div><strong>{issue.title}</strong><p>{issue.detail}</p><button className="text-button" onClick={() => setPaste(SAMPLE)}>Use a safe example</button></div>
+                    <div><strong>{issue.title}</strong><p>{issue.detail}</p><button className="text-button" onClick={() => setPaste(SAMPLE)}>Load an example</button></div>
                   </div>
                 )}
                 <div className="paste-actions">
                   <button className="secondary-button" onClick={() => { setPaste(SAMPLE); setIssue(null); }}>Try sample</button>
-                  <button className="primary-button" onClick={runParser}>Build my sked <span>→</span></button>
+                  <button className="primary-button" onClick={runParser}>Continue</button>
                 </div>
-                <details className="copy-guide">
-                  <summary>Where should I copy from?</summary>
-                  <div className="copy-example"><b>Block No. : CS 402</b><br />Section · Subject · Units<br />…your subject records…<br /><b>Total Units : 12</b></div>
-                  <p>Copy from <strong>Block No.</strong> through <strong>Total Units</strong>. The entire page also works.</p>
-                </details>
-                <div className="local-note"><span className="shield">✓</span><div><strong>Processed only on this device</strong><p>Your student number, name, fees, balances, and payment details are ignored. The pasted text is discarded after confirmation.</p></div></div>
+                <p className="one-line-privacy">Processed on this device. No account, upload, or student number.</p>
               </>
             ) : parsed ? (
               <>
@@ -581,7 +603,6 @@ export default function Home() {
                   <button className="back-button" onClick={() => setStage("paste")} aria-label="Go back">←</button>
                   <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects · {parsed.totalUnits} units found</p></div>
                 </div>
-                <div className="success-strip"><span>✓</span><div><strong>Personal and financial information ignored</strong><p>Only the subject details below will be saved.</p></div></div>
                 {parsed.warnings.map((warning) => <div className="warning-strip" key={warning}>! {warning}</div>)}
                 <div className="review-list">
                   {parsed.subjects.map((subject) => (
@@ -599,17 +620,16 @@ export default function Home() {
                   <h3>Confirm the semester dates</h3><p>These dates aren’t included in the enlistment page.</p>
                   <div className="date-fields"><label>Classes start<input type="date" value={termStart} onChange={(e) => setTermStart(e.target.value)} /></label><label>Classes end<input type="date" value={termEnd} onChange={(e) => setTermEnd(e.target.value)} /></label></div>
                 </div>
-                <div className="review-section optional-profile">
-                  <h3>Personalize exports <span>Optional</span></h3>
-                  <div className="profile-fields"><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Leave blank for My Weekly Sked" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} /></label></div>
-                  <p className="fine-print">Student numbers are never saved. These optional labels stay on this device.</p>
-                </div>
-                <button className="primary-button wide" disabled={!parsed.subjects.length} onClick={saveSchedule}>Save on this device <span>→</span></button>
+                <details className="optional-profile">
+                  <summary>Optional profile details</summary>
+                  <div className="profile-fields"><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Optional" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} placeholder="Optional" /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} placeholder="Optional" /></label></div>
+                </details>
+                <button className="primary-button wide" disabled={!parsed.subjects.length} onClick={saveSchedule}>Save schedule</button>
               </>
             ) : null}
           </div>
         </section>
-        <footer className="public-footer"><strong>AnoSked</strong><span>Your schedule stays yours.</span></footer>
+        <footer className="public-footer">Local for now. Removing the app or clearing browser data removes its data too.</footer>
         {notice && <div className="toast">{notice}</div>}
       </main>
     );
@@ -618,27 +638,27 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="wordmark app-wordmark"><span className="brand-mark small">A</span>AnoSked</div>
+        <div className="wordmark app-wordmark"><Image className="brand-mark small" src="/assets/AnoSkedfinallogo.png" alt="" width={38} height={38} priority />AnoSked</div>
         <nav>
           {([
-            ["today", "Today", "●"], ["calendar", "Calendar", "▦"], ["tasks", "Tasks", "✓"], ["subjects", "Subjects", "▤"], ["settings", "Settings", "○"],
-          ] as Array<[View, string, string]>).map(([key, label, icon]) => (
-            <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><span>{icon}</span>{label}{key === "tasks" && data.tasks.filter((task) => !task.done).length > 0 ? <b>{data.tasks.filter((task) => !task.done).length}</b> : null}</button>
+            ["today", "Today"], ["calendar", "Calendar"], ["tasks", "Tasks"], ["subjects", "Subjects"],
+          ] as Array<[View, string]>).map(([key, label]) => (
+            <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{label}{key === "tasks" && data.tasks.filter((task) => !task.done).length > 0 ? <b>{data.tasks.filter((task) => !task.done).length}</b> : null}</button>
           ))}
         </nav>
-        <div className="sidebar-local"><span className="status-dot" /><div><strong>Stored locally</strong><p>Only on this device</p></div></div>
+        <button className="sidebar-settings" onClick={() => setView("settings")}>Settings</button>
       </aside>
 
       <section className="app-main">
         <header className="app-header">
           <div><span className="mobile-wordmark">AnoSked</span><p>{data.semester}{data.block ? ` · ${data.block}` : ""}</p></div>
-          <button className="avatar-button" onClick={() => setView("settings")}>{data.profile.nickname?.[0]?.toUpperCase() || "A"}</button>
+          <button className="manage-button" onClick={() => setView("settings")}>Manage</button>
         </header>
 
         {view === "today" && (
           <div className="page today-page">
             <div className="page-title-row">
-              <div><div className="eyebrow">Your day at a glance</div><h1>{formatDate(selectedDate)}</h1><p>{daySubjects.length ? `${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"} today` : "No classes today"}</p></div>
+              <div><h1>{formatDate(selectedDate)}</h1><p>{daySubjects.length ? `${daySubjects.length} ${daySubjects.length === 1 ? "class" : "classes"}` : "No classes"}</p></div>
               <button className="date-button" onClick={() => setSelectedDate(new Date())}>Today</button>
             </div>
             <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
@@ -664,27 +684,52 @@ export default function Home() {
               </div>
               <aside className="today-side">
                 <div className="side-card"><div className="section-heading"><h2>Due today</h2><button onClick={() => setView("tasks")}>View all</button></div>{todayTasks.length ? todayTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`side-task ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{subject?.code} · {new Date(task.dueAt).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <p className="muted-copy">Nothing due. Your evening is yours.</p>}</div>
-                <div className="privacy-card"><div className="shield large">✓</div><h3>Your sked stays here</h3><p>Subjects and tasks are stored only on this device. Export a backup before deleting the app.</p><button onClick={exportBackup}>Export backup</button></div>
               </aside>
             </div>
           </div>
         )}
 
         {view === "calendar" && (
-          <div className="page">
-            <div className="page-title-row"><div><div className="eyebrow">Your own calendar</div><h1>Weekly sked</h1><p>Easy to read, simple to share.</p></div><div className="export-menu"><button className="secondary-button" onClick={() => drawSchedule("share")}>Export image</button><button className="primary-button" onClick={() => drawSchedule("wallpaper")}>iPhone wallpaper</button></div></div>
-            <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
-            <div className="week-card">
-              <div className="week-header"><div><span>{DAY_META.find((day) => day.code === dayCode)?.label}</span><strong>{selectedDate.toLocaleDateString("en-PH", { month: "short", day: "numeric" })}</strong></div><button onClick={exportICS}>Export .ics calendar</button></div>
-            <div className="week-list">{daySubjects.length ? daySubjects.map((subject) => <div className="week-event" key={subject.id}><div className="week-time"><strong>{formatTime(subject.meeting.start)}</strong><span>{formatTime(subject.meeting.end)}</span></div><div className="week-block" style={{ background: `${subject.color}18` }}><span className="week-dot" style={{ background: subject.color }} /><div><span style={{ color: "#4A3026" }}>{subject.code}</span><h3>{subject.title}</h3></div><p>{subject.meeting.room}</p></div></div>) : <EmptyState title="No classes" detail="This day has no enrolled subjects." />}</div>
+          <div className="page calendar-page">
+            <div className="calendar-toolbar">
+              <div><h1>Calendar</h1><p>{data.semester}</p></div>
+              <div className="calendar-actions">
+                <div className="view-switch" aria-label="Calendar view">
+                  <button className={calendarMode === "day" ? "active" : ""} onClick={() => setCalendarMode("day")}>Day</button>
+                  <button className={calendarMode === "week" ? "active" : ""} onClick={() => setCalendarMode("week")}>Week</button>
+                </div>
+                <button className="quiet-button" onClick={exportICS}>Add to calendar</button>
+                <button className="sky-button" onClick={() => drawSchedule("share")}>Save image</button>
+              </div>
             </div>
-            <div className="export-explainer"><div><span>Image</span><h3>Shareable weekly card</h3><p>A clean PNG for class chats and Stories.</p><button onClick={() => drawSchedule("share")}>Download image</button></div><div><span>Wallpaper</span><h3>Lock Screen-ready</h3><p>Leaves space for the iPhone clock and controls.</p><button onClick={() => drawSchedule("wallpaper")}>Download wallpaper</button></div><div><span>Calendar</span><h3>Apple or Google</h3><p>Recurring classes with 15-minute reminders.</p><button onClick={exportICS}>Download .ics</button></div></div>
+
+            {calendarMode === "day" ? (
+              <>
+                <DayStrip selectedDate={selectedDate} onSelect={setSelectedDate} />
+                <div className="day-calendar">
+                  <div className="day-calendar-heading"><strong>{DAY_META.find((day) => day.code === dayCode)?.label}</strong><span>{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</span></div>
+                  {daySubjects.length ? daySubjects.map((subject) => (
+                    <div className="day-class" key={subject.id}>
+                      <div className="day-class-time"><strong>{formatTime(subject.meeting.start)}</strong><span>{formatTime(subject.meeting.end)}</span></div>
+                      <div className="day-class-card" style={{ background: `${subject.color}18` }}>
+                        <div><strong>{subject.code}</strong><span>{subject.title}</span></div><b>{subject.meeting.room}</b>
+                      </div>
+                    </div>
+                  )) : <EmptyState title="No classes" detail="Nothing scheduled for this day." />}
+                </div>
+              </>
+            ) : <WeeklyTimetable subjects={data.subjects} />}
+
+            <div className="calendar-export-bar">
+              <span>Use this weekly layout anywhere.</span>
+              <div><button onClick={() => drawSchedule("wallpaper")}>iPhone wallpaper</button><button onClick={() => drawSchedule("share")}>PNG image</button></div>
+            </div>
           </div>
         )}
 
         {view === "tasks" && (
           <div className="page tasks-page">
-            <div className="page-title-row"><div><div className="eyebrow">Subject-linked work</div><h1>Tasks</h1><p>Set a deadline in a few taps.</p></div></div>
+            <div className="page-title-row"><div><h1>Tasks</h1><p>{data.tasks.filter((task) => !task.done).length} open</p></div></div>
             <div className="tasks-layout">
               <div className="task-composer"><h2>Add a task</h2><label>What needs to be done?<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="Finish research chapter 1" /></label><label>Subject<select value={taskSubject} onChange={(e) => setTaskSubject(e.target.value)}><option value="">Choose a subject</option>{data.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.code} · {subject.title}</option>)}</select></label><label>Due date<input type="datetime-local" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} /></label><div className="quick-dates"><button onClick={setDueNextClass}>Due next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>7 days from now</button></div><button className="primary-button wide" onClick={createTask}>Add task</button></div>
               <div className="task-list-card"><div className="section-heading"><h2>All tasks</h2><span>{data.tasks.filter((task) => !task.done).length} open</span></div>{data.tasks.length ? [...data.tasks].sort((a, b) => a.dueAt.localeCompare(b.dueAt)).map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); return <button className={`task-row ${task.done ? "done" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span className="task-check">{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p><b style={{ color: subject?.color }}>{subject?.code}</b> · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="No tasks yet" detail="Add your first task and connect it to a subject." />}</div>
@@ -694,29 +739,102 @@ export default function Home() {
 
         {view === "subjects" && (
           <div className="page">
-            <div className="page-title-row"><div><div className="eyebrow">{data.totalUnits} total units</div><h1>Enrolled subjects</h1><p>{data.subjects.length} subject workspaces, created automatically.</p></div></div>
+            <div className="page-title-row"><div><h1>Subjects</h1><p>{data.subjects.length} subjects · {data.totalUnits} units</p></div></div>
             <div className="subject-grid">{data.subjects.map((subject) => <article className="subject-card" key={subject.id}><div className="subject-card-top"><span className="subject-bubble" style={{ background: `${subject.color}18`, color: subject.color }}>{subject.code.slice(0, 2)}</span><span className="unit-pill">{subject.units} units</span></div><span className="subject-code" style={{ color: subject.color }}>{subject.code}</span><h2>{subject.title}</h2><div className="subject-detail"><span>{subject.meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><strong>{formatTime(subject.meeting.start)}–{formatTime(subject.meeting.end)}</strong></div><div className="subject-room"><span>Room</span><strong>{subject.meeting.room}</strong></div><div className="subject-task-count">{data.tasks.filter((task) => task.subjectId === subject.id && !task.done).length} open tasks</div></article>)}</div>
           </div>
         )}
 
         {view === "settings" && (
           <div className="page settings-page">
-            <div className="page-title-row"><div><div className="eyebrow">Your device, your data</div><h1>Settings</h1><p>Manage privacy, backups, and your schedule.</p></div></div>
-            <div className="settings-grid">
-              <section className="settings-card privacy-settings"><div className="shield jumbo">✓</div><div><span className="setting-label">Privacy & storage</span><h2>Stored locally on this device</h2><p>AnoSked does not upload or collect your enrollment text, subjects, schedule, tasks, or optional profile details. There is no account or cloud backup.</p><ul><li>Student numbers are never saved</li><li>Fees and payment details are ignored</li><li>Original pasted text is discarded</li></ul><div className="loss-warning"><strong>Deleting AnoSked or clearing browser data may permanently erase everything.</strong><p>Export a backup before removing the app or changing devices.</p></div></div></section>
-              <section className="settings-card"><span className="setting-label">Backup & restore</span><h2>Keep a copy you control</h2><p>Backups contain structured subjects and tasks—not the original enrollment page.</p><div className="settings-actions"><button className="primary-button" onClick={exportBackup}>Export backup</button><button className="secondary-button" onClick={() => fileInput.current?.click()}>Restore backup</button><input ref={fileInput} type="file" accept="application/json,.json" onChange={restoreBackup} hidden /></div></section>
-              <section className="settings-card"><span className="setting-label">Optional profile</span><h2>Personalize exports</h2><div className="settings-form"><label>Name or nickname<input value={data.profile.nickname} onChange={(e) => setData({ ...data, profile: { ...data.profile, nickname: e.target.value } })} placeholder="Optional" /></label><label>Program<input value={data.profile.program} onChange={(e) => setData({ ...data, profile: { ...data.profile, program: e.target.value } })} placeholder="Optional" /></label><label>Year level<input value={data.profile.yearLevel} onChange={(e) => setData({ ...data, profile: { ...data.profile, yearLevel: e.target.value } })} placeholder="Optional" /></label></div></section>
-              <section className="settings-card"><span className="setting-label">Schedule</span><h2>Update or start over</h2><p>Your current sked has {data.subjects.length} subjects for {data.semester}.</p><div className="settings-actions"><button className="secondary-button" onClick={() => { exportBackup(); setNotice("Backup first—then you can safely replace your sked."); }}>Backup before update</button><button className="danger-button" onClick={() => { if (window.confirm("Delete all subjects and tasks stored on this device? This cannot be undone without a backup.")) { setData(null); setStage("paste"); } }}>Delete local data</button></div></section>
+            <div className="page-title-row"><div><h1>Settings</h1></div></div>
+            <div className="settings-panel">
+              <div className="local-disclosure"><strong>Local storage</strong><span>AnoSked collects nothing. Delete the app or clear browser data and this schedule is gone.</span></div>
+              <details open>
+                <summary><span><strong>Backup</strong><small>Move or protect your schedule</small></span><b>›</b></summary>
+                <div className="setting-content"><button className="sky-button" onClick={exportBackup}>Export backup</button><button className="quiet-button" onClick={() => fileInput.current?.click()}>Restore</button><input ref={fileInput} type="file" accept="application/json,.json" onChange={restoreBackup} hidden /></div>
+              </details>
+              <details>
+                <summary><span><strong>Profile</strong><small>Optional labels for exports</small></span><b>›</b></summary>
+                <div className="setting-content settings-form"><label>Name or nickname<input value={data.profile.nickname} onChange={(e) => setData({ ...data, profile: { ...data.profile, nickname: e.target.value } })} placeholder="Optional" /></label><label>Program<input value={data.profile.program} onChange={(e) => setData({ ...data, profile: { ...data.profile, program: e.target.value } })} placeholder="Optional" /></label><label>Year level<input value={data.profile.yearLevel} onChange={(e) => setData({ ...data, profile: { ...data.profile, yearLevel: e.target.value } })} placeholder="Optional" /></label></div>
+              </details>
+              <details>
+                <summary><span><strong>Schedule</strong><small>{data.subjects.length} subjects · {data.semester}</small></span><b>›</b></summary>
+                <div className="setting-content"><button className="danger-button" onClick={() => setConfirmDelete(true)}>Delete local data</button></div>
+              </details>
             </div>
           </div>
         )}
       </section>
 
       <nav className="mobile-nav">
-        {([ ["today", "Today", "●"], ["calendar", "Calendar", "▦"], ["tasks", "Tasks", "✓"], ["subjects", "Subjects", "▤"], ["settings", "Settings", "○"] ] as Array<[View, string, string]>).map(([key, label, icon]) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><span>{icon}</span>{label}</button>)}
+        {([ ["today", "Today"], ["calendar", "Calendar"], ["tasks", "Tasks"], ["subjects", "Subjects"], ["settings", "Settings"] ] as Array<[View, string]>).map(([key, label]) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>{label}</button>)}
       </nav>
+      {confirmDelete && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmDelete(false); }}>
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+            <Image src="/assets/AnoSkedfinallogo.png" alt="" width={54} height={54} />
+            <h2 id="delete-title">Delete this schedule?</h2>
+            <p>Subjects and tasks will be removed from this device. A backup is the only way to restore them.</p>
+            <div><button className="quiet-button" onClick={() => setConfirmDelete(false)}>Cancel</button><button className="confirm-delete" onClick={() => { setConfirmDelete(false); setData(null); setStage("paste"); }}>Delete</button></div>
+          </div>
+        </div>
+      )}
       {notice && <div className="toast">{notice}</div>}
     </main>
+  );
+}
+
+function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
+  const firstHour = 7;
+  const lastHour = 22;
+  const hours = Array.from({ length: lastHour - firstHour + 1 }, (_, index) => firstHour + index);
+  const totalMinutes = (lastHour - firstHour) * 60;
+  const events = subjects.flatMap((subject) => subject.meeting.days.map((day) => ({ subject, day })));
+
+  return (
+    <div className="timetable-shell">
+      <div className="timetable" aria-label="Weekly class timetable">
+        <div className="timetable-header">
+          <div className="time-corner" />
+          {DAY_META.map((day) => <div key={day.code}><strong>{day.short}</strong><span>{day.label.slice(0, 3)}</span></div>)}
+        </div>
+        <div className="timetable-content">
+          <div className="time-axis">
+            {hours.slice(0, -1).map((hour) => <span key={hour} style={{ top: `${((hour - firstHour) / (lastHour - firstHour)) * 100}%` }}>{formatTime(`${String(hour).padStart(2, "0")}:00`).replace(":00", "")}</span>)}
+          </div>
+          <div className="schedule-grid">
+            <div className="day-columns">{DAY_META.map((day) => <i key={day.code} />)}</div>
+            <div className="hour-lines">{hours.map((hour) => <i key={hour} style={{ top: `${((hour - firstHour) / (lastHour - firstHour)) * 100}%` }} />)}</div>
+            {events.map(({ subject, day }) => {
+              const dayIndex = DAY_META.findIndex((item) => item.code === day);
+              const [startHour, startMinute] = subject.meeting.start.split(":").map(Number);
+              const [endHour, endMinute] = subject.meeting.end.split(":").map(Number);
+              const start = Math.max(0, startHour * 60 + startMinute - firstHour * 60);
+              const end = Math.min(totalMinutes, endHour * 60 + endMinute - firstHour * 60);
+              if (end <= 0 || start >= totalMinutes || end <= start) return null;
+              return (
+                <div
+                  className="schedule-block"
+                  key={`${subject.id}-${day}`}
+                  style={{
+                    left: `calc(${dayIndex * (100 / 7)}% + 4px)`,
+                    width: `calc(${100 / 7}% - 8px)`,
+                    top: `calc(${(start / totalMinutes) * 100}% + 3px)`,
+                    height: `calc(${((end - start) / totalMinutes) * 100}% - 6px)`,
+                    background: `${subject.color}1F`,
+                    color: subject.color,
+                  }}
+                >
+                  <strong>{subject.code}</strong>
+                  <span>{subject.meeting.room}</span>
+                  <small>{formatTime(subject.meeting.start).replace(":00", "")}–{formatTime(subject.meeting.end).replace(":00", "")}</small>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -729,5 +847,5 @@ function DayStrip({ selectedDate, onSelect }: { selectedDate: Date; onSelect: (d
 }
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
-  return <div className="empty-state"><div>○</div><h3>{title}</h3><p>{detail}</p></div>;
+  return <div className="empty-state"><Image src="/assets/AnoSkedfinallogo.png" alt="" width={38} height={38} /><h3>{title}</h3><p>{detail}</p></div>;
 }

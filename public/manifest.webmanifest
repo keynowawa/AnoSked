@@ -5,9 +5,9 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#F6F2EA",
-  "theme_color": "#CFE5EF",
+  "background_color": "#F4F8FB",
+  "theme_color": "#89D0EF",
   "icons": [
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "/assets/AnoSkedfinallogo.png", "sizes": "1875x1875", "type": "image/png", "purpose": "any" }
   ]
 }
