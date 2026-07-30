@@ -1294,7 +1294,7 @@ export default function Home() {
               </>
             ) : parsed ? (
               <>
-                <div className="card-heading">
+                <div className="card-heading review-heading">
                   <button className="back-button" onClick={() => setStage("paste")} aria-label="Go back">←</button>
                   <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects · {parsed.totalUnits} units found</p></div><button className="review-add-class" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={14} /> Add class</button>
                 </div>
