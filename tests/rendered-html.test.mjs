@@ -66,3 +66,19 @@ test("ships keyboard-safe dialogs and permits browser zoom", async () => {
   assert.match(page, /className="skip-link"/);
   assert.doesNotMatch(layout, /userScalable|maximumScale/);
 });
+
+test("ships preview-first image exports and persistent appearance choices", async () => {
+  const [page, styles, imageModule] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/scheduleImage.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /Preview your schedule/);
+  assert.match(page, /Save to device/);
+  assert.match(page, /anosked\.appearance\.v1/);
+  assert.match(page, /prefers-color-scheme: dark/);
+  assert.match(styles, /:root\[data-theme="dark"\]/);
+  assert.match(styles, /\.schedule-preview\.wallpaper/);
+  for (const theme of ["sky", "rose", "meadow", "sunshine"]) assert.match(imageModule, new RegExp(`id: "${theme}"`));
+});

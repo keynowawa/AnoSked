@@ -6,6 +6,7 @@ import { AccessibleDialog } from "./components/AccessibleDialog";
 import { Icon } from "./components/Icon";
 import { ColorPicker, DayStrip, EmptyState, IconPicker, ReviewDaysDialog, ReviewTimeSelect, WeeklyTimetable } from "./components/SchedulePieces";
 import { extractScheduleFile } from "./lib/importScheduleFile";
+import { renderScheduleCanvas, SCHEDULE_IMAGE_THEMES, type ScheduleImageMode, type ScheduleImageTheme } from "./lib/scheduleImage";
 import {
   buildICS, COLORS, compactTitle, dateKey, DAY_META, formatTime, getSelectedDay,
   isRecord, isValidStoredData, nextClassDate, parseEnrollment, subjectIcon,
@@ -20,6 +21,7 @@ type InstallPromptEvent = Event & {
 };
 
 const STORAGE_KEY = "anosked.local.v1";
+const APPEARANCE_KEY = "anosked.appearance.v1";
 const SHARE_URL = "https://anosked.vercel.app";
 const SHARE_MESSAGE = `Meet AnoSked? 📅
 
@@ -179,6 +181,7 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showExportSheet, setShowExportSheet] = useState(false);
+  const [appearance, setAppearance] = useState<"system" | "light" | "dark">("system");
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
@@ -194,6 +197,8 @@ export default function Home() {
   useEffect(() => {
     window.queueMicrotask(() => {
       try {
+        const savedAppearance = localStorage.getItem(APPEARANCE_KEY);
+        if (savedAppearance === "system" || savedAppearance === "light" || savedAppearance === "dark") setAppearance(savedAppearance);
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
           const parsedSaved: unknown = JSON.parse(saved);
@@ -213,6 +218,22 @@ export default function Home() {
       void image.decode().catch(() => undefined);
     });
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyAppearance = () => {
+      const resolved = appearance === "system" ? (media.matches ? "dark" : "light") : appearance;
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+      document.querySelector('meta[name="theme-color"]')?.setAttribute("content", resolved === "dark" ? "#10191E" : "#89D0EF");
+    };
+    applyAppearance();
+    localStorage.setItem(APPEARANCE_KEY, appearance);
+    if (appearance !== "system") return;
+    media.addEventListener("change", applyAppearance);
+    return () => media.removeEventListener("change", applyAppearance);
+  }, [appearance, hydrated]);
 
   useEffect(() => {
     const captureInstall = (event: Event) => {
@@ -634,108 +655,10 @@ export default function Home() {
     }
   }
 
-  function drawSchedule(mode: "image" | "wallpaper", action: "save" | "share" = "save") {
+  function exportScheduleImage(mode: ScheduleImageMode, theme: ScheduleImageTheme, action: "save" | "share" = "save") {
     if (!data) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = mode === "wallpaper" ? 1290 : 1800;
-    canvas.height = mode === "wallpaper" ? 2796 : 1500;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const width = canvas.width;
-    const height = canvas.height;
-    const margin = mode === "wallpaper" ? 58 : 72;
-    const top = mode === "wallpaper" ? 880 : 210;
-    const bottom = mode === "wallpaper" ? 180 : 90;
-    const timeWidth = mode === "wallpaper" ? 78 : 105;
-    const scheduleEntries = data.subjects.flatMap((subject) => subjectMeetings(subject).map((meeting) => ({ subject, meeting })));
-    const days = DAY_META.filter((day) => scheduleEntries.some(({ meeting }) => meeting.days.includes(day.code)));
-    const starts = scheduleEntries.map(({ meeting }) => { const [hour, minute] = meeting.start.split(":").map(Number); return hour * 60 + minute; });
-    const ends = scheduleEntries.map(({ meeting }) => { const [hour, minute] = meeting.end.split(":").map(Number); return hour * 60 + minute; });
-    const firstHour = Math.floor(Math.min(...starts) / 60);
-    const lastHour = Math.ceil(Math.max(...ends) / 60);
-    const hourSpan = Math.max(1, lastHour - firstHour);
-    const gridLeft = margin + timeWidth;
-    const gridWidth = width - gridLeft - margin;
-    const headerHeight = mode === "wallpaper" ? 70 : 76;
-    const gridTop = top + headerHeight;
-    const gridHeight = height - gridTop - bottom;
-    const hourHeight = gridHeight / hourSpan;
-    const dayWidth = gridWidth / days.length;
-
-    ctx.fillStyle = "#EAF6FC";
-    ctx.fillRect(0, 0, width, height);
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#153A52";
-    ctx.font = `700 ${mode === "wallpaper" ? 52 : 62}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(data.exportTitle?.trim() || (data.profile.nickname ? `${data.profile.nickname}’s week` : "My week"), width / 2, top - 112);
-    ctx.fillStyle = "#56788D";
-    ctx.font = `500 ${mode === "wallpaper" ? 24 : 27}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(`${data.semester}${data.block ? `  •  ${data.block}` : ""}`, width / 2, top - 62);
-
-    ctx.fillStyle = "rgba(255,255,255,.86)";
-    ctx.beginPath();
-    ctx.roundRect(margin, top, width - margin * 2, height - top - bottom + 16, mode === "wallpaper" ? 30 : 36);
-    ctx.fill();
-
-    days.forEach((day, dayIndex) => {
-      const x = gridLeft + dayIndex * dayWidth;
-      ctx.fillStyle = "#56788D";
-      ctx.font = `700 ${mode === "wallpaper" ? 16 : 20}px -apple-system, BlinkMacSystemFont, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.fillText(day.short.toUpperCase(), x + dayWidth / 2, top + headerHeight * .62);
-    });
-
-    for (let index = 0; index <= days.length; index += 1) {
-      const x = gridLeft + index * dayWidth;
-      ctx.strokeStyle = "rgba(71,128,158,.14)";
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x, top + 14); ctx.lineTo(x, gridTop + gridHeight); ctx.stroke();
-    }
-
-    for (let hour = firstHour; hour <= lastHour; hour += 1) {
-      const y = gridTop + (hour - firstHour) * hourHeight;
-      ctx.strokeStyle = "rgba(71,128,158,.16)";
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(margin + 16, y); ctx.lineTo(width - margin - 16, y); ctx.stroke();
-      if (hour < lastHour) {
-        ctx.fillStyle = "#6E8796";
-        ctx.font = `500 ${mode === "wallpaper" ? 14 : 18}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.textAlign = "right";
-        ctx.fillText(formatTime(`${String(hour).padStart(2, "0")}:00`).replace(":00", ""), gridLeft - 16, y + 6);
-      }
-    }
-
-    scheduleEntries.forEach(({ subject, meeting }) => meeting.days.forEach((day) => {
-      const dayIndex = days.findIndex((item) => item.code === day);
-      if (dayIndex < 0) return;
-      const [startHour, startMinute] = meeting.start.split(":").map(Number);
-      const [endHour, endMinute] = meeting.end.split(":").map(Number);
-      const startOffset = startHour + startMinute / 60 - firstHour;
-      const duration = endHour + endMinute / 60 - (startHour + startMinute / 60);
-      const x = gridLeft + dayIndex * dayWidth + 4;
-      const y = gridTop + startOffset * hourHeight + 3;
-      const blockWidth = dayWidth - 8;
-      const blockHeight = Math.max(duration * hourHeight - 6, 34);
-      ctx.globalAlpha = .88;
-      ctx.fillStyle = subject.color;
-      ctx.beginPath(); ctx.roundRect(x, y, blockWidth, blockHeight, 14); ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "#FFFFFF";
-      ctx.textAlign = "left";
-      ctx.font = `700 ${mode === "wallpaper" ? 12 : 16}px -apple-system, BlinkMacSystemFont, sans-serif`;
-      ctx.fillText(subject.title, x + 10, y + 22, blockWidth - 18);
-      if (blockHeight > 54) {
-        ctx.fillStyle = "rgba(255,255,255,.84)";
-        ctx.font = `600 ${mode === "wallpaper" ? 11 : 15}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.fillText(`${subject.code} · ${meeting.room}`, x + 10, y + 43, blockWidth - 18);
-      }
-    }));
-
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#153A52";
-    ctx.font = `700 ${mode === "wallpaper" ? 20 : 24}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText("Made with AnoSked?", width / 2, height - (mode === "wallpaper" ? 86 : 34));
-    const filename = `AnoSked-${mode}-${dateKey(new Date())}.png`;
+    const canvas = renderScheduleCanvas(data, mode, theme);
+    const filename = `AnoSked-${mode}-${theme}-${dateKey(new Date())}.png`;
     const blob = canvasBlob(canvas);
     if (action === "save") {
       triggerDownload(blob, "image/png", filename);
@@ -990,6 +913,10 @@ export default function Home() {
                 <div className="setting-content sound-setting"><div className="sound-setting-copy"><strong>AnoSked? chime</strong><p>A soft signature sound confirms saves, completed tasks, and changes. Moving around the app stays quiet.</p></div><div className="sound-setting-controls"><button className="quiet-button" onClick={() => playFeedbackTone("complete")}>Play chime</button><button className={`switch-control ${data.soundEffects !== false ? "on" : ""}`} role="switch" aria-label="In-app sounds" aria-checked={data.soundEffects !== false} onClick={() => { const enabled = data.soundEffects === false; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div></div>
               </details>
               <details>
+                <summary><span className="setting-summary-main"><i><Icon name="appearance" size={17} /></i><span><strong>Appearance</strong><small>{appearance === "system" ? "Matches your device" : appearance === "dark" ? "Dark" : "Light"}</small></span></span><b>›</b></summary>
+                <div className="setting-content appearance-setting"><p>Choose what feels comfortable. Mascot artwork keeps its original colors.</p><div className="appearance-options" role="group" aria-label="Appearance"><button aria-pressed={appearance === "system"} className={appearance === "system" ? "selected" : ""} onClick={() => setAppearance("system")}>System</button><button aria-pressed={appearance === "light"} className={appearance === "light" ? "selected" : ""} onClick={() => setAppearance("light")}>Light</button><button aria-pressed={appearance === "dark"} className={appearance === "dark" ? "selected" : ""} onClick={() => setAppearance("dark")}>Dark</button></div></div>
+              </details>
+              <details>
                 <summary><span className="setting-summary-main"><i><Icon name="calendarAdd" size={17} /></i><span><strong>Class reminders</strong><small>Use dependable Apple or Google Calendar alerts</small></span></span><b>›</b></summary>
                 <div className="setting-content reminder-setting"><p>System Web Push needs a future notification service. For now, export recurring classes with 15-minute calendar alerts.</p><button className="sky-button icon-button" onClick={exportICS}><Icon name="calendarAdd" size={15} /> Add to calendar</button></div>
               </details>
@@ -1047,7 +974,7 @@ export default function Home() {
             <div><button className="quiet-button" onClick={() => setSubjectPendingDelete(null)}>Keep class</button><button className="confirm-delete" onClick={deleteSubject}>Delete class</button></div>
         </AccessibleDialog>
       )}
-      {showExportSheet && <ExportDialog onClose={() => setShowExportSheet(false)} onWallpaper={() => { setShowExportSheet(false); drawSchedule("wallpaper", "save"); }} onImage={() => { setShowExportSheet(false); drawSchedule("image", "save"); }} onShare={() => { setShowExportSheet(false); drawSchedule("image", "share"); }} />}
+      {showExportSheet && <ExportDialog data={data} onClose={() => setShowExportSheet(false)} onExport={(mode, theme, action) => { setShowExportSheet(false); exportScheduleImage(mode, theme, action); }} />}
       {showSubjectForm && <SubjectDialog onClose={() => { setShowSubjectForm(false); setEditingSubject(null); }} onSave={saveSubject} color={editingSubject?.color || COLORS[data.subjects.length % COLORS.length]} initial={editingSubject || undefined} />}
       {showDuePicker && <DueDateDialog value={taskDue} onClose={() => setShowDuePicker(false)} onSelect={(value) => { setTaskDue(value); setShowDuePicker(false); }} />}
       {showReport && <ReportDialog onClose={() => setShowReport(false)} />}
@@ -1170,8 +1097,24 @@ function InstallDialog({ onClose }: { onClose: () => void }) {
   return <AccessibleDialog className="brand-dialog install-dialog" labelledBy="install-title" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.webp" alt="" /><h2 id="install-title">Add AnoSked? to your Home Screen</h2><div className="install-steps"><div><b>iPhone or iPad</b><span>Open the Share menu, choose “Add to Home Screen,” then tap Add.</span></div><div><b>Android</b><span>Open your browser menu and choose “Install app” or “Add to Home screen.”</span></div></div><button className="sky-button wide-dialog" onClick={onClose}>Got it</button></AccessibleDialog>;
 }
 
-function ExportDialog({ onClose, onWallpaper, onImage, onShare }: { onClose: () => void; onWallpaper: () => void; onImage: () => void; onShare: () => void }) {
-  return <AccessibleDialog className="brand-dialog export-dialog" labelledBy="export-title" describedBy="export-description" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.webp" alt="" /><h2 id="export-title">Save your weekly timetable</h2><p id="export-description">Save a file directly to your device, or open the separate sharing option.</p><div className="export-choices"><button onClick={onWallpaper}><Icon name="today" /><span><strong>Save iPhone wallpaper</strong><small>Leaves room for the Lock Screen clock and widgets</small></span></button><button onClick={onImage}><Icon name="image" /><span><strong>Save PNG image</strong><small>Downloads the weekly timetable to your device</small></span></button><button className="share-export-choice" onClick={onShare}><Icon name="share" /><span><strong>Share PNG image</strong><small>Opens your device’s sharing menu</small></span></button></div></AccessibleDialog>;
+function ExportDialog({ data, onClose, onExport }: { data: SkedData; onClose: () => void; onExport: (mode: ScheduleImageMode, theme: ScheduleImageTheme, action: "save" | "share") => void }) {
+  const [mode, setMode] = useState<ScheduleImageMode>("wallpaper");
+  const [theme, setTheme] = useState<ScheduleImageTheme>("sky");
+  const preview = useMemo(() => renderScheduleCanvas(data, mode, theme).toDataURL("image/png"), [data, mode, theme]);
+
+  return <AccessibleDialog className="brand-dialog export-dialog" labelledBy="export-title" describedBy="export-description" onClose={onClose}>
+    <button className="dialog-close" onClick={onClose} aria-label="Close">×</button>
+    <div className="export-heading"><img src="/assets/default.webp" alt="" /><div><h2 id="export-title">Preview your schedule</h2><p id="export-description">Choose a size and color, then save exactly what you see.</p></div></div>
+    <div className="export-workspace">
+      <div className={`schedule-preview ${mode}`}><img src={preview} alt={`${SCHEDULE_IMAGE_THEMES.find((item) => item.id === theme)?.label} ${mode === "wallpaper" ? "phone wallpaper" : "weekly timetable"} preview`} /></div>
+      <div className="export-controls">
+        <fieldset><legend>Format</legend><div className="export-segmented"><button className={mode === "wallpaper" ? "selected" : ""} aria-pressed={mode === "wallpaper"} onClick={() => setMode("wallpaper")}><Icon name="today" size={16} /> Wallpaper</button><button className={mode === "image" ? "selected" : ""} aria-pressed={mode === "image"} onClick={() => setMode("image")}><Icon name="image" size={16} /> Timetable</button></div></fieldset>
+        <fieldset><legend>Color</legend><div className="export-themes">{SCHEDULE_IMAGE_THEMES.map((item) => <button key={item.id} className={theme === item.id ? "selected" : ""} aria-pressed={theme === item.id} onClick={() => setTheme(item.id)}><i style={{ background: item.background }} /><span>{item.label}</span></button>)}</div></fieldset>
+        <p className="export-size-note">{mode === "wallpaper" ? "Tall layout with clear space for your Lock Screen clock and widgets." : "Wide layout for sharing, printing, or keeping in Photos."}</p>
+        <div className="export-actions"><button className="sky-button icon-button" onClick={() => onExport(mode, theme, "save")}><Icon name="install" size={16} /> Save to device</button><button className="quiet-button icon-button" onClick={() => onExport(mode, theme, "share")}><Icon name="share" size={16} /> Share</button></div>
+      </div>
+    </div>
+  </AccessibleDialog>;
 }
 
 function PolicyDialog({ type, onClose }: { type: "privacy" | "terms"; onClose: () => void }) {

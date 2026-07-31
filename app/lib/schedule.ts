@@ -1,6 +1,6 @@
 export type DayCode = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
 
-export type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "share" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "calculator" | "globe" | "backup" | "profile" | "trash" | "sound" | "edit";
+export type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "share" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "calculator" | "globe" | "backup" | "profile" | "trash" | "sound" | "edit" | "appearance";
 
 export type Meeting = {
   days: DayCode[];
@@ -83,7 +83,7 @@ export const DAY_META: Array<{ code: DayCode; short: string; label: string; js: 
 
 export const TIMETABLE_GRID_DETAIL = "This looks like text copied from a timetable image or PDF. Its rows and columns were lost, so AnoSked can’t safely match subjects with their times and rooms. Upload the original timetable when supported, paste a line-by-line subject list, or add each class manually.";
 
-const ICON_NAMES = new Set<IconName>(["today", "calendar", "tasks", "subjects", "settings", "about", "install", "share", "image", "calendarAdd", "jump", "book", "flask", "key", "cpu", "balance", "calculator", "globe", "backup", "profile", "trash", "sound", "edit"]);
+const ICON_NAMES = new Set<IconName>(["today", "calendar", "tasks", "subjects", "settings", "about", "install", "share", "image", "calendarAdd", "jump", "book", "flask", "key", "cpu", "balance", "calculator", "globe", "backup", "profile", "trash", "sound", "edit", "appearance"]);
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 export function uid(prefix = "id") {
