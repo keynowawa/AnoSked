@@ -78,6 +78,27 @@ Assessment of Fees
 TUITION FEE (LEC SUBJECT/S) 51,925.00
 Total Due : 62,832.00`;
 
+const CLUSTERED_SECTIONS_SAMPLE = `Welcome to Adamson University
+Subject Enlistment
+Mid-year Term 2025-2026
+TAGLE, JEL KYANN JAYME 202313899
+B.S. COMPUTER SCIENCE Third Year - Mid-year Term
+Enrolled Subjects Pre-Advised Subjects Online Survey
+Print Enrolled Subjects Print Enrolled Subjects
+Enrolled Subjects
+Section Subject Units
+25010 25002 25008 25005 CS341 : HUMAN COMPUTER INTERACTION (9731)
+MTWThF 15:30-18:00 SV218 3
+CS422 : PROJECT MANAGEMENT (9751)
+MTWThF 10:00-12:30 SV217 3
+CS462 : RSC4- DATA SCIENCE CAPSTONE PROJECT (250052)
+MTWThF 07:00-09:30 SV217 3
+CS416B : SOFTWARE QUALITY ASSURANCE (250079)
+MTWThF 13:00-15:30 SV217 3
+Total Units : 12
+Assessment of Fees
+TUITION FEE (LEC SUBJECT/S) 21,096.00`;
+
 const FLEXIBLE_SAMPLE = `CS 26114
 THESIS II
 T - 2-5pm Room 1911
@@ -188,6 +209,20 @@ test("parses compact and wrapped Adamson enrollment rows before the fees section
   assert.equal(parsed.result?.subjects[8].internalId, "4910");
   assert.equal(parsed.result?.subjects[8].meeting.room, "SV203");
   assert.equal(parsed.result?.subjects[11].title, "TRANSFORMING THE WORLD WITH VINCENT DE PAUL");
+});
+
+test("parses enrollment rows when copied section numbers collapse ahead of the subjects", () => {
+  const parsed = parseEnrollment(CLUSTERED_SECTIONS_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 4);
+  assert.equal(parsed.result?.semester, "Mid-year Term 2025-2026");
+  assert.equal(parsed.result?.program, "B.S. COMPUTER SCIENCE");
+  assert.equal(parsed.result?.yearLevel, "Third Year");
+  assert.equal(parsed.result?.totalUnits, 12);
+  assert.deepEqual(parsed.result?.subjects.map((subject) => subject.code), ["CS341", "CS422", "CS462", "CS416B"]);
+  assert.deepEqual(parsed.result?.subjects.map((subject) => subject.sectionId), ["25010", "25002", "25008", "25005"]);
+  assert.deepEqual(parsed.result?.subjects[0].meeting.days, ["MO", "TU", "WE", "TH", "FR"]);
+  assert.equal(parsed.result?.subjects[3].meeting.room, "SV217");
 });
 
 test("parses a school-neutral line-by-line schedule with multiple meetings", () => {

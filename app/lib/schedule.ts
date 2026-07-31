@@ -238,28 +238,54 @@ function parseEnrollmentScheduleLine(line: string) {
   return { meeting: { days, ...times, room: trailing.join(" ") || "TBA" }, units };
 }
 
+const ENROLLMENT_SUBJECT_HEADER = /(?:^|\s)((?:\d{4,}\s+)*)([A-Z][A-Z0-9_-]*(?:\s+[A-Z0-9_-]+){0,2})\s*:\s*(.+)$/i;
+
+function matchEnrollmentSubjectHeader(line: string) {
+  const match = line.trim().match(ENROLLMENT_SUBJECT_HEADER);
+  if (!match || !/\d/.test(match[2])) return null;
+  return {
+    sectionIds: match[1].trim().split(/\s+/).filter((value) => /^\d{4,}$/.test(value)),
+    code: match[2].trim().replace(/^([A-Z]{2,})\s+(?=\d)/i, "$1").toUpperCase(),
+    title: match[3].trim(),
+  };
+}
+
+function findEnrollmentTerm(lines: string[]) {
+  for (const line of lines) {
+    const match = line.match(/((?:\d+(?:st|nd|rd|th)\s+(?:Semester|Term)|Mid[-\s]?year\s+Term|Summer\s+Term)\s+\d{4}\s*[-–]\s*\d{4})/i);
+    if (match) return match[1].replace(/(\d{4})\s*[-–]\s*(\d{4})/, "$1-$2");
+  }
+  return "";
+}
+
 function parseEnrollmentSubjectRows(lines: string[], start: number, end: number) {
   const subjects: Subject[] = [];
   const warnings: string[] = [];
-  const subjectHeader = /^(?:(\d{4,})\s+)?([A-Z]{2,}\s?\d{2,}[A-Z]*)\s*:\s*(.+)$/i;
+  const pendingSectionIds: string[] = [];
   for (let index = start; index < end; index += 1) {
+    if (/^(?:\d{4,}\s+)+\d{4,}$/.test(lines[index])) {
+      pendingSectionIds.push(...lines[index].split(/\s+/));
+      continue;
+    }
     let sectionId = "";
     let headerLine = lines[index];
-    if (/^\d{4,}$/.test(headerLine) && subjectHeader.test(lines[index + 1] || "")) {
+    if (/^\d{4,}$/.test(headerLine) && matchEnrollmentSubjectHeader(lines[index + 1] || "")) {
       sectionId = headerLine;
       index += 1;
       headerLine = lines[index];
     }
-    const header = headerLine.match(subjectHeader);
+    const header = matchEnrollmentSubjectHeader(headerLine);
     if (!header) continue;
-    sectionId ||= header[1] || "";
-    const titleParts = [header[3].trim()];
+    if (header.sectionIds.length > 1) pendingSectionIds.push(...header.sectionIds);
+    else if (header.sectionIds.length === 1) sectionId ||= header.sectionIds[0];
+    sectionId ||= pendingSectionIds.shift() || "";
+    const titleParts = [header.title];
     let cursor = index + 1;
     let schedule: ReturnType<typeof parseEnrollmentScheduleLine> = null;
     while (cursor < end && cursor <= index + 4) {
       schedule = parseEnrollmentScheduleLine(lines[cursor]);
       if (schedule) break;
-      if (subjectHeader.test(lines[cursor]) || /^\d{4,}$/.test(lines[cursor])) break;
+      if (matchEnrollmentSubjectHeader(lines[cursor]) || /^\d{4,}$/.test(lines[cursor])) break;
       titleParts.push(lines[cursor].trim());
       cursor += 1;
     }
@@ -273,10 +299,10 @@ function parseEnrollmentSubjectRows(lines: string[], start: number, end: number)
     const fullTitle = titleParts.join(" ").replace(/\s+/g, " ").trim();
     const internalId = fullTitle.match(/\s*\((\d+)\)\s*$/)?.[1];
     const title = fullTitle.replace(/\s*\(\d+\)\s*$/, "").trim();
-    if (!units) warnings.push(`${header[2].replace(/\s/g, "").toUpperCase()} has no units listed and was saved as 0.`);
+    if (!units) warnings.push(`${header.code} has no units listed and was saved as 0.`);
     subjects.push({
       id: uid("sub"), sectionId: sectionId || undefined, internalId,
-      code: header[2].replace(/\s/g, "").toUpperCase(), title, units,
+      code: header.code, title, units,
       color: COLORS[subjects.length % COLORS.length], meeting: schedule.meeting,
     });
     index = consumedThrough;
@@ -393,20 +419,22 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
   const blockIndex = lines.findIndex((line) => /^Block\s*No\.?\s*:/i.test(line));
   const totalIndex = lines.findIndex((line, index) => index > Math.max(blockIndex, -1) && /^Total\s+Units\s*:/i.test(line));
   const assessmentIndex = lines.findIndex((line, index) => index > Math.max(blockIndex, -1) && /^Assessment\s+of\s+Fees/i.test(line));
-  const firstSubjectIndex = lines.findIndex((line) => /^[A-Z]{2,}\s?\d{2,}[A-Z]?\s*:\s*.+/i.test(line));
+  const firstSubjectIndex = lines.findIndex((line) => Boolean(matchEnrollmentSubjectHeader(line)));
 
-  if (blockIndex >= 0) {
+  if (firstSubjectIndex >= 0) {
+    const enrolledHeadingIndex = lines.reduce((last, line, index) => index < firstSubjectIndex && /^Enrolled\s+Subjects$/i.test(line) ? index : last, -1);
+    const tableStart = blockIndex >= 0 ? blockIndex + 1 : enrolledHeadingIndex >= 0 ? enrolledHeadingIndex + 1 : Math.max(0, firstSubjectIndex - 1);
     const tableEnd = [totalIndex, assessmentIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? lines.length;
-    const enrolled = parseEnrollmentSubjectRows(lines, blockIndex + 1, tableEnd);
+    const enrolled = parseEnrollmentSubjectRows(lines, tableStart, tableEnd);
     if (enrolled.subjects.length) {
-      const semester = lines.find((line) => /^\d+(?:st|nd|rd|th)\s+Semester\s+\d{4}-\d{4}$/i.test(line)) || "";
+      const semester = findEnrollmentTerm(lines);
       const yearLevelIndex = lines.findIndex((line) => /(?:First|Second|Third|Fourth|Fifth)\s+Year/i.test(line));
       const yearLevelLine = yearLevelIndex >= 0 ? lines[yearLevelIndex] : "";
       const yearLevel = yearLevelLine.match(/(?:First|Second|Third|Fourth|Fifth)\s+Year/i)?.[0] || "";
       const programIndex = lines.findIndex((line) => /^(?:DUAL\s+DEGREE|B\.?S\.?|B\.?A\.?|Bachelor|Master)/i.test(line));
       const programEnd = programIndex >= 0 && yearLevelIndex > programIndex ? yearLevelIndex : programIndex + 1;
-      const program = programIndex >= 0 ? lines.slice(programIndex, programEnd).join(" ").replace(/\s+/g, " ").trim() : "";
-      const block = lines[blockIndex].split(":").slice(1).join(":").trim();
+      const program = programIndex >= 0 ? lines.slice(programIndex, programEnd).join(" ").replace(/\s+(?:First|Second|Third|Fourth|Fifth)\s+Year\b.*$/i, "").replace(/\s+/g, " ").trim() : "";
+      const block = blockIndex >= 0 ? lines[blockIndex].split(":").slice(1).join(":").trim() : "";
       const declaredUnits = totalIndex >= 0 ? Number(lines[totalIndex].match(/([\d.]+)\s*$/)?.[1] || 0) : 0;
       const parsedUnits = enrolled.subjects.reduce((sum, subject) => sum + subject.units, 0);
       if (declaredUnits && parsedUnits !== declaredUnits) enrolled.warnings.push(`The subjects add up to ${parsedUnits} units, but the page says ${declaredUnits}. Review the list before saving.`);
@@ -427,7 +455,7 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
     return { issue: { kind: "missing-table", title: "No class schedule was found", detail: "Paste the part that lists each subject code, class days, start and end time, room, and units." } };
   }
 
-  const semester = lines.find((line) => /^\d+(?:st|nd|rd|th)\s+Semester\s+\d{4}-\d{4}$/i.test(line)) || "";
+  const semester = findEnrollmentTerm(lines);
   const program = lines.find((line) => /^(?:B\.?S\.?|B\.?A\.?|Bachelor|Master)/i.test(line)) || "";
   const yearLevelLine = lines.find((line) => /(?:First|Second|Third|Fourth|Fifth)\s+Year/i.test(line)) || "";
   const yearLevel = yearLevelLine.match(/(?:First|Second|Third|Fourth|Fifth)\s+Year/i)?.[0] || "";
