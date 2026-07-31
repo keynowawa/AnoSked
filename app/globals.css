@@ -447,3 +447,50 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     .app-header { height:calc(63px + env(safe-area-inset-top)); }
   }
 }
+
+/* Keep native mobile time controls inside the Add class or activity form. */
+.subject-form label,
+.meeting-editors,
+.meeting-editor,
+.meeting-fields,
+.meeting-fields label { min-width:0; }
+.subject-form input,
+.meeting-fields input[type="time"] {
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+.meeting-fields {
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.35fr);
+}
+.meeting-fields label { overflow:hidden; }
+.meeting-fields input[type="time"] { display:block; }
+
+@media (max-width: 680px) {
+  .meeting-fields {
+    width:100%;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .meeting-fields label:last-child { grid-column:1/-1; }
+  .meeting-fields input[type="time"] {
+    padding-left:8px;
+    padding-right:8px;
+    overflow:hidden;
+  }
+}
+
+@supports (-webkit-touch-callout: none) {
+  .subject-dialog .meeting-fields input[type="time"]::-webkit-date-and-time-value {
+    width:100%;
+    min-width:0;
+    margin:0;
+    text-align:left;
+  }
+  .subject-dialog .meeting-fields input[type="time"]::-webkit-datetime-edit,
+  .subject-dialog .meeting-fields input[type="time"]::-webkit-datetime-edit-fields-wrapper {
+    min-width:0;
+    margin:0;
+    padding:0;
+  }
+}

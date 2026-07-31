@@ -83,6 +83,7 @@ test("ships preview-first image exports and persistent appearance choices", asyn
   assert.match(page, /prefers-color-scheme: dark/);
   assert.match(styles, /:root\[data-theme="dark"\]/);
   assert.match(styles, /\.schedule-preview\.wallpaper/);
+  assert.match(styles, /\.meeting-fields\s*\{[^}]*minmax\(0,1fr\)/);
   for (const theme of ["sky", "rose", "meadow", "sunshine", "midnight", "electric"]) assert.match(imageModule, new RegExp(`id: "${theme}"`));
   assert.match(page, /navigator\.vibrate/);
   assert.doesNotMatch(page, /Mascot artwork keeps its original colors/);
