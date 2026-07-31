@@ -73,6 +73,12 @@ function greeting(date = new Date()) {
   return "Good evening";
 }
 
+function formatTermDate(value: string) {
+  if (!value) return "Not set";
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? "Not set" : date.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+}
+
 function reviewMeetingSummary(subject: Subject) {
   const meetings = subjectMeetings(subject);
   const first = meetings[0];
@@ -908,6 +914,10 @@ export default function Home() {
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="profile" size={17} /></i><span><strong>Profile and exports</strong><small>Customize names and image headings</small></span></span><b>›</b></summary>
                 <div className="setting-content settings-form"><label>Export heading<input value={data.exportTitle || ""} onChange={(e) => setData({ ...data, exportTitle: e.target.value })} placeholder="My week" /></label><label>Name or nickname<input value={data.profile.nickname} onChange={(e) => setData({ ...data, profile: { ...data.profile, nickname: e.target.value } })} placeholder="Optional" /></label><label>Program<input value={data.profile.program} onChange={(e) => setData({ ...data, profile: { ...data.profile, program: e.target.value } })} placeholder="Optional" /></label><label>Year level<input value={data.profile.yearLevel} onChange={(e) => setData({ ...data, profile: { ...data.profile, yearLevel: e.target.value } })} placeholder="Optional" /></label><p className="autosave-note">Changes save automatically on this device.</p></div>
+              </details>
+              <details>
+                <summary><span className="setting-summary-main"><i><Icon name="calendar" size={17} /></i><span><strong>Semester dates</strong><small>{formatTermDate(data.termStart)} to {formatTermDate(data.termEnd)}</small></span></span><b>›</b></summary>
+                <div className="setting-content settings-form term-date-settings"><label>Classes start<span className="date-input-shell"><input type="date" value={data.termStart} max={data.termEnd} onChange={(event) => setData({ ...data, termStart: event.target.value })} /><i aria-hidden="true" /></span></label><label>Classes end<span className="date-input-shell"><input type="date" value={data.termEnd} min={data.termStart} onChange={(event) => setData({ ...data, termEnd: event.target.value })} /><i aria-hidden="true" /></span></label><p className="autosave-note">The dashboard and recurring calendar export use this date range. Changes save automatically.</p></div>
               </details>
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="sound" size={17} /></i><span><strong>In-app sounds</strong><small>{data.soundEffects !== false ? "On for helpful confirmations" : "Off"}</small></span></span><b>›</b></summary>

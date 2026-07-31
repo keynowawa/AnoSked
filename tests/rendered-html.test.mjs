@@ -87,5 +87,6 @@ test("ships preview-first image exports and persistent appearance choices", asyn
   assert.match(page, /navigator\.vibrate/);
   assert.doesNotMatch(page, /Mascot artwork keeps its original colors/);
   assert.match(page, /Created by mmmkay studios/);
+  assert.match(page, /Semester dates/);
   assert.doesNotMatch(page, /Kyann Tagle/);
 });
