@@ -861,7 +861,7 @@ export default function Home() {
 
   function startManualSchedule() {
     setIssue(null);
-    setParsed({ semester: "", block: "", totalUnits: 0, program: "", yearLevel: "", subjects: [], warnings: ["Add each class below, then confirm your semester dates."] });
+    setParsed({ semester: "", block: "", totalUnits: 0, program: "", yearLevel: "", subjects: [], warnings: [] });
     setOpenReviewSubjectId(null);
     setProfile({ nickname: "", program: "", yearLevel: "" });
     setTermStart("");
@@ -1314,6 +1314,7 @@ export default function Home() {
                   <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects ready. Tap one to edit.</p></div><button className="review-add-class" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={14} /> Add class</button>
                 </div>
                 {parsed.warnings.map((warning) => <div className="warning-strip" key={warning}>! {warning}</div>)}
+                <div className="review-save-dock"><label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="primary-button" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button></div>
                 <div className="review-list">
                   {parsed.subjects.map((subject) => {
                     const isOpen = openReviewSubjectId === subject.id;
@@ -1345,7 +1346,6 @@ export default function Home() {
                   <summary>Optional profile details</summary>
                   <div className="profile-fields"><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Optional" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} placeholder="Optional" /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} placeholder="Optional" /></label></div>
                 </details>
-                <div className="review-save-dock"><label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="primary-button" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button></div>
               </>
             ) : null}
           </div>
