@@ -92,6 +92,7 @@ No account needed. Your schedule stays on your device.
 Your classes, rooms, and deadlines, all one tap away.`;
 const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#B86B5E", "#A8628E", "#4F8668"];
 const MASCOT_ASSETS = ["/assets/default.webp", "/assets/thinking.webp", "/assets/studying.webp", "/assets/checklist.webp", "/assets/noclass.webp"];
+const REVIEW_TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`);
 const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number }> = [
   { code: "MO", short: "Mon", label: "Monday", js: 1 },
   { code: "TU", short: "Tue", label: "Tuesday", js: 2 },
@@ -1321,7 +1322,6 @@ export default function Home() {
                   <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects ready. Tap one to edit.</p></div><button className="review-add-class" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={14} /> Add class</button>
                 </div>
                 {parsed.warnings.map((warning) => <div className="warning-strip" key={warning}>! {warning}</div>)}
-                <div className="review-save-dock"><label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="primary-button" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button></div>
                 <div className="review-list">
                   {parsed.subjects.map((subject) => {
                     const isOpen = openReviewSubjectId === subject.id;
@@ -1337,7 +1337,7 @@ export default function Home() {
                         </div>
                         {isOpen && <div className="review-fields" id={`review-subject-${subject.id}`}>
                           <div className="inline-fields"><label className="subject-code-input"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><i style={{ background: subject.color }} /></label><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
-                          <div className="review-meetings">{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="schedule-edit" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><span className="meeting-days">{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={meeting.start} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "start", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} start time`} /></label><label>Ends<input type="time" value={meeting.end} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "end", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} end time`} /></label><label>Room<input value={meeting.room} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "room", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} room`} /></label></div>)}</div>
+                          <div className="review-meetings">{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="schedule-edit" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><div className="meeting-identity"><span>Meeting {meetingIndex + 1}</span><strong>{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</strong></div><div className="meeting-time-range"><ReviewTimeSelect label="Starts" value={meeting.start} onChange={(value) => updateParsedMeeting(subject.id, meetingIndex, "start", value)} /><span className="time-range-arrow" aria-hidden="true">→</span><ReviewTimeSelect label="Ends" value={meeting.end} onChange={(value) => updateParsedMeeting(subject.id, meetingIndex, "end", value)} /></div><label className="meeting-room-field">Room<input value={meeting.room} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "room", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} room`} /></label></div>)}</div>
                           <details className="review-customize"><summary><span>Icon and color</span><span className="review-look-preview"><Icon name={subject.icon || subjectIcon(subject)} size={14} /><i style={{ background: subject.color }} /><b>›</b></span></summary><div className="review-customize-panel"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div></details>
                         </div>}
                       </article>
@@ -1346,13 +1346,14 @@ export default function Home() {
                 </div>
                 <div className="review-section">
                   <h3>Confirm the semester</h3><p>Add anything the imported schedule did not include.</p>
-                  <div className="term-fields"><label>Term or semester<input value={parsed.semester} onChange={(event) => setParsed({ ...parsed, semester: event.target.value })} placeholder="e.g. 1st Term 2026–2027" /></label><label>Section or block <small>Optional</small><input value={parsed.block} onChange={(event) => setParsed({ ...parsed, block: event.target.value })} placeholder="e.g. 4CSD" /></label></div>
+                  <div className="term-fields single-field"><label>Term or semester<input value={parsed.semester} onChange={(event) => setParsed({ ...parsed, semester: event.target.value })} placeholder="e.g. 1st Term 2026–2027" /></label></div>
                   <div className="date-fields"><label>Classes start<input type="date" value={termStart} onChange={(e) => setTermStart(e.target.value)} /></label><label>Classes end<input type="date" value={termEnd} onChange={(e) => setTermEnd(e.target.value)} /></label></div>
                 </div>
                 <details className="optional-profile">
-                  <summary>Optional profile details</summary>
-                  <div className="profile-fields"><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Optional" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} placeholder="Optional" /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} placeholder="Optional" /></label></div>
+                  <summary>Optional details</summary>
+                  <div className="profile-fields"><label>Section or block<input value={parsed.block} onChange={(event) => setParsed({ ...parsed, block: event.target.value })} placeholder="e.g. 4CSD" /></label><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Optional" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} placeholder="Optional" /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} placeholder="Optional" /></label></div>
                 </details>
+                <div className="review-save-dock"><label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="primary-button" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button></div>
               </>
             ) : null}
           </div>
@@ -1658,6 +1659,11 @@ function DayStrip({ selectedDate, onSelect }: { selectedDate: Date; onSelect: (d
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
   return <div className="empty-state"><img src="/assets/noclass.webp" alt="" /><h3>{title}</h3><p>{detail}</p></div>;
+}
+
+function ReviewTimeSelect({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const options = REVIEW_TIME_OPTIONS.includes(value) ? REVIEW_TIME_OPTIONS : [...REVIEW_TIME_OPTIONS, value].sort();
+  return <label>{label}<select value={value} onChange={(event) => onChange(event.target.value)} aria-label={`${label} time`}>{options.map((time) => <option value={time} key={time}>{formatTime(time)}</option>)}</select></label>;
 }
 
 function IconPicker({ value, onChange, compact = false }: { value: IconName; onChange: (icon: IconName) => void; compact?: boolean }) {
