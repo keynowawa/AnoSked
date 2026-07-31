@@ -311,9 +311,26 @@ export default function Home() {
   const highlightedSubjectId = activeDaySubject?.subject.id || nextDaySubject?.subject.id;
   const openTasks = data?.tasks.filter((task) => !task.done) || [];
   const overdueTasks = openTasks.filter((task) => new Date(task.dueAt).getTime() < clock.getTime());
-  const dashboardTasks = selectedIsToday
-    ? [...overdueTasks, ...todayTasks.filter((task) => !overdueTasks.some((overdue) => overdue.id === task.id))]
-    : todayTasks;
+  const selectedWeekStart = new Date(selectedDate);
+  selectedWeekStart.setHours(0, 0, 0, 0);
+  selectedWeekStart.setDate(selectedWeekStart.getDate() - ((selectedWeekStart.getDay() + 6) % 7));
+  const selectedWeekEnd = new Date(selectedWeekStart);
+  selectedWeekEnd.setDate(selectedWeekEnd.getDate() + 6);
+  const currentWeekStart = new Date(clock);
+  currentWeekStart.setHours(0, 0, 0, 0);
+  currentWeekStart.setDate(currentWeekStart.getDate() - ((currentWeekStart.getDay() + 6) % 7));
+  const selectedWeekIsCurrent = dateKey(selectedWeekStart) === dateKey(currentWeekStart);
+  const selectedWeekTasks = openTasks.filter((task) => {
+    const dueKey = task.dueAt.slice(0, 10);
+    return dueKey >= dateKey(selectedWeekStart) && dueKey <= dateKey(selectedWeekEnd);
+  });
+  const dashboardTasks = (selectedWeekIsCurrent
+    ? [...overdueTasks, ...selectedWeekTasks.filter((task) => !overdueTasks.some((overdue) => overdue.id === task.id))]
+    : selectedWeekTasks
+  ).sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  const weekRangeLabel = selectedWeekStart.getMonth() === selectedWeekEnd.getMonth()
+    ? `${selectedWeekStart.toLocaleDateString("en-PH", { month: "short", day: "numeric" })}–${selectedWeekEnd.getDate()}`
+    : `${selectedWeekStart.toLocaleDateString("en-PH", { month: "short", day: "numeric" })}–${selectedWeekEnd.toLocaleDateString("en-PH", { month: "short", day: "numeric" })}`;
   const semesterEnded = Boolean(data && new Date(`${data.termEnd}T23:59:59`).getTime() < clock.getTime());
   const dashboardSummary = selectedAfterTerm
     ? semesterEnded && selectedIsToday
@@ -840,7 +857,7 @@ export default function Home() {
                 })}
               </div>
               <aside className="today-side">
-                <div className="side-card"><div className="section-heading"><h2>{selectedIsToday && overdueTasks.length ? "Needs attention" : selectedIsToday ? "Due today" : `Due ${selectedWeekday}`}</h2><button onClick={() => setView("tasks")}>View all</button></div>{dashboardTasks.length ? dashboardTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); const overdue = !task.done && new Date(task.dueAt).getTime() < clock.getTime(); return <button className={`side-task ${task.done ? "done" : ""} ${overdue ? "overdue" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{overdue ? "Overdue · " : ""}{subject?.title} · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="All clear" detail={selectedIsToday ? "Nothing is due today." : "Nothing is due on this day."} />}</div>
+                <div className="side-card"><div className="section-heading"><h2>{selectedWeekIsCurrent ? "Due this week" : `Due ${weekRangeLabel}`}</h2><button onClick={() => setView("tasks")}>View all</button></div>{dashboardTasks.length ? dashboardTasks.map((task) => { const subject = data.subjects.find((item) => item.id === task.subjectId); const overdue = !task.done && new Date(task.dueAt).getTime() < clock.getTime(); return <button className={`side-task ${task.done ? "done" : ""} ${overdue ? "overdue" : ""}`} key={task.id} onClick={() => toggleTask(task.id)}><span>{task.done ? "✓" : ""}</span><div><strong>{task.title}</strong><p>{overdue ? "Overdue · " : ""}{subject?.title} · {new Date(task.dueAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></div></button>; }) : <EmptyState title="All clear" detail={selectedWeekIsCurrent ? "No open tasks are due this week." : `No open tasks are due ${weekRangeLabel}.`} />}</div>
               </aside>
             </div>
           </div>

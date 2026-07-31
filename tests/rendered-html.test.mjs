@@ -84,10 +84,13 @@ test("ships preview-first image exports and persistent appearance choices", asyn
   assert.match(styles, /:root\[data-theme="dark"\]/);
   assert.match(styles, /\.schedule-preview\.wallpaper/);
   assert.match(styles, /\.meeting-fields\s*\{[^}]*minmax\(0,1fr\)/);
+  assert.match(styles, /\.side-task\s*\{[^}]*align-items:center/);
   for (const theme of ["sky", "rose", "meadow", "sunshine", "midnight", "electric"]) assert.match(imageModule, new RegExp(`id: "${theme}"`));
   assert.match(page, /navigator\.vibrate/);
   assert.doesNotMatch(page, /Mascot artwork keeps its original colors/);
   assert.match(page, /Created by mmmkay studios/);
   assert.match(page, /Semester dates/);
+  assert.match(page, /Due this week/);
+  assert.match(page, /No open tasks are due this week/);
   assert.doesNotMatch(page, /Kyann Tagle/);
 });

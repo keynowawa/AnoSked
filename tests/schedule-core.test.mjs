@@ -271,6 +271,12 @@ test("normalizes common twelve-hour meeting formats", () => {
   assert.deepEqual(parseFlexibleMeeting("W 10:30 to 1:30 Room 1911"), { days: ["WE"], start: "10:30", end: "13:30", room: "1911" });
 });
 
+test("explains a mismatch between parsed and declared units", () => {
+  const parsed = parseEnrollment(ADAMSON_SAMPLE.replace("Total Units : 12", "Total Units : 13"));
+  assert.match(parsed.result?.warnings.join(" ") || "", /subject or unit value may be missing/i);
+  assert.match(parsed.result?.warnings.join(" ") || "", /official schedule/i);
+});
+
 test("rejects flattened timetable grids and fee-only text with explicit guidance", () => {
   const grid = parseEnrollment("CLASS SCHEDULE TIME 7:00 AM 7:30 AM MONDAY TUESDAY WEDNESDAY THURSDAY FRIDAY RM 1909 RM 1904 4CSD");
   assert.equal(grid.issue?.kind, "timetable-grid");

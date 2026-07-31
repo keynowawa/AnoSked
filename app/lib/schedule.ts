@@ -437,7 +437,7 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
       const block = blockIndex >= 0 ? lines[blockIndex].split(":").slice(1).join(":").trim() : "";
       const declaredUnits = totalIndex >= 0 ? Number(lines[totalIndex].match(/([\d.]+)\s*$/)?.[1] || 0) : 0;
       const parsedUnits = enrolled.subjects.reduce((sum, subject) => sum + subject.units, 0);
-      if (declaredUnits && parsedUnits !== declaredUnits) enrolled.warnings.push(`The subjects add up to ${parsedUnits} units, but the page says ${declaredUnits}. Review the list before saving.`);
+      if (declaredUnits && parsedUnits !== declaredUnits) enrolled.warnings.push(`The subjects below total ${parsedUnits} units, while your source lists ${declaredUnits}. A subject or unit value may be missing. Compare this list with your official schedule before saving.`);
       if (!semester) enrolled.warnings.push("The semester label was not found. You can add it before saving.");
       return { result: { semester, block, totalUnits: declaredUnits || parsedUnits, program, yearLevel, subjects: enrolled.subjects, warnings: enrolled.warnings } };
     }
@@ -501,7 +501,7 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
   }
 
   const parsedUnits = subjects.reduce((sum, subject) => sum + subject.units, 0);
-  if (declaredUnits && parsedUnits !== declaredUnits) warnings.push(`The subjects add up to ${parsedUnits} units, but the page says ${declaredUnits}. Review the list before saving.`);
+  if (declaredUnits && parsedUnits !== declaredUnits) warnings.push(`The subjects below total ${parsedUnits} units, while your source lists ${declaredUnits}. A subject or unit value may be missing. Compare this list with your official schedule before saving.`);
   if (!semester) warnings.push("The semester label was not found. You can add it before saving.");
   return { result: { semester, block, totalUnits: declaredUnits || parsedUnits, program, yearLevel, subjects, warnings } };
 }

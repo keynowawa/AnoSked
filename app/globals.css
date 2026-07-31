@@ -448,6 +448,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   }
 }
 
+/* Keep dashboard task checks vertically aligned with their task details. */
+.side-task { align-items:center; }
+.side-task > span { align-self:center; }
+
 /* Keep native mobile time controls inside the Add class or activity form. */
 .subject-form label,
 .meeting-editors,
