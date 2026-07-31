@@ -31,19 +31,38 @@ test("renders AnoSked metadata and hardened response headers", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 
-test("keeps local data and offline imports constrained", async () => {
-  const [page, serviceWorker, manifest] = await Promise.all([
+test("keeps local data, install metadata, and offline imports constrained", async () => {
+  const [page, scheduleCore, serviceWorker, manifest] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/schedule.ts", import.meta.url), "utf8"),
     readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
     readFile(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /function isValidStoredData/);
+  assert.match(scheduleCore, /function isValidStoredData/);
   assert.match(page, /file\.size > 2_000_000/);
   assert.match(page, /localStorage\.setItem\(STORAGE_KEY/);
   assert.doesNotMatch(page, /dangerouslySetInnerHTML|\beval\s*\(/);
   assert.match(serviceWorker, /url\.origin !== self\.location\.origin/);
+  assert.match(serviceWorker, /event\.request\.mode === "navigate"/);
   assert.match(serviceWorker, /response\.ok && response\.type === "basic"/);
   assert.match(manifest, /"name": "AnoSked\?"/);
+  assert.match(manifest, /"sizes": "192x192"/);
+  assert.match(manifest, /"sizes": "512x512"/);
+  assert.match(manifest, /"purpose": "maskable"/);
   assert.match(manifest, /"theme_color": "#89D0EF"/i);
+});
+
+test("ships keyboard-safe dialogs and permits browser zoom", async () => {
+  const [dialog, layout, page] = await Promise.all([
+    readFile(new URL("../app/components/AccessibleDialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dialog, /event\.key === "Escape"/);
+  assert.match(dialog, /event\.key !== "Tab"/);
+  assert.match(dialog, /aria-modal="true"/);
+  assert.match(page, /className="skip-link"/);
+  assert.doesNotMatch(layout, /userScalable|maximumScale/);
 });

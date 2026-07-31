@@ -2,86 +2,24 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-
-type DayCode = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
-
-type Meeting = {
-  days: DayCode[];
-  start: string;
-  end: string;
-  room: string;
-};
-
-type Subject = {
-  id: string;
-  sectionId?: string;
-  internalId?: string;
-  code: string;
-  title: string;
-  units: number;
-  color: string;
-  icon?: IconName;
-  meeting: Meeting;
-  meetings?: Meeting[];
-};
-
-type Task = {
-  id: string;
-  subjectId: string;
-  title: string;
-  dueAt: string;
-  done: boolean;
-};
-
-type Profile = {
-  nickname: string;
-  program: string;
-  yearLevel: string;
-};
-
-type SkedData = {
-  semester: string;
-  block: string;
-  totalUnits: number;
-  termStart: string;
-  termEnd: string;
-  profile: Profile;
-  exportTitle?: string;
-  subjects: Subject[];
-  tasks: Task[];
-  createdAt: string;
-  consent?: { acceptedAt: string; version: string };
-  soundEffects?: boolean;
-  tourCompleted?: boolean;
-};
-
-type ParseIssue = {
-  kind: "empty" | "fees-only" | "missing-table" | "empty-table" | "incomplete" | "timetable-grid" | "file";
-  title: string;
-  detail: string;
-};
-
-type ParseResult = {
-  semester: string;
-  block: string;
-  totalUnits: number;
-  program: string;
-  yearLevel: string;
-  subjects: Subject[];
-  warnings: string[];
-};
-
-type View = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about";
+import { AccessibleDialog } from "./components/AccessibleDialog";
+import { Icon } from "./components/Icon";
+import { ColorPicker, DayStrip, EmptyState, IconPicker, ReviewDaysDialog, ReviewTimeSelect, WeeklyTimetable } from "./components/SchedulePieces";
+import { extractScheduleFile } from "./lib/importScheduleFile";
+import {
+  buildICS, COLORS, compactTitle, dateKey, DAY_META, formatTime, getSelectedDay,
+  isRecord, isValidStoredData, nextClassDate, parseEnrollment, subjectIcon,
+  subjectMeetings, uid,
+  type DayCode, type IconName, type Meeting, type ParseIssue, type ParseResult,
+  type Profile, type SkedData, type Subject, type Task, type View,
+} from "./lib/schedule";
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-type IconName = "today" | "calendar" | "tasks" | "subjects" | "settings" | "about" | "install" | "share" | "image" | "calendarAdd" | "jump" | "book" | "flask" | "key" | "cpu" | "balance" | "calculator" | "globe" | "backup" | "profile" | "trash" | "sound" | "edit";
-
 const STORAGE_KEY = "anosked.local.v1";
-const TIMETABLE_GRID_DETAIL = "This looks like text copied from a timetable image or PDF. Its rows and columns were lost, so AnoSked can’t safely match subjects with their times and rooms. Upload the original timetable when supported, paste a line-by-line subject list, or add each class manually.";
 const SHARE_URL = "https://anosked.vercel.app";
 const SHARE_MESSAGE = `Meet AnoSked? 📅
 
@@ -90,70 +28,13 @@ Paste your enrolled subjects and turn them into a clear daily timeline and weekl
 No account needed. Your schedule stays on your device.
 
 Your classes, rooms, and deadlines, all one tap away.`;
-const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#B86B5E", "#A8628E", "#4F8668"];
 const MASCOT_ASSETS = ["/assets/default.webp", "/assets/thinking.webp", "/assets/studying.webp", "/assets/checklist.webp", "/assets/noclass.webp"];
-const REVIEW_TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`);
-const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number }> = [
-  { code: "MO", short: "Mon", label: "Monday", js: 1 },
-  { code: "TU", short: "Tue", label: "Tuesday", js: 2 },
-  { code: "WE", short: "Wed", label: "Wednesday", js: 3 },
-  { code: "TH", short: "Thu", label: "Thursday", js: 4 },
-  { code: "FR", short: "Fri", label: "Friday", js: 5 },
-  { code: "SA", short: "Sat", label: "Saturday", js: 6 },
-  { code: "SU", short: "Sun", label: "Sunday", js: 0 },
-];
 const PRIMARY_NAV: Array<{ key: View; label: string; icon: IconName }> = [
   { key: "today", label: "Today", icon: "today" },
   { key: "calendar", label: "Calendar", icon: "calendar" },
   { key: "tasks", label: "Tasks", icon: "tasks" },
   { key: "subjects", label: "Subjects", icon: "subjects" },
 ];
-const SUBJECT_ICONS: Array<{ icon: IconName; label: string }> = [
-  { icon: "book", label: "Book" },
-  { icon: "flask", label: "Research" },
-  { icon: "cpu", label: "Technology" },
-  { icon: "key", label: "Security" },
-  { icon: "balance", label: "Humanities" },
-  { icon: "calculator", label: "Mathematics" },
-  { icon: "globe", label: "Language or social studies" },
-];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isShortString(value: unknown, max = 500): value is string {
-  return typeof value === "string" && value.length <= max;
-}
-
-function isValidStoredData(value: unknown): value is SkedData {
-  if (!isRecord(value) || !Array.isArray(value.subjects) || !Array.isArray(value.tasks) || !isRecord(value.profile)) return false;
-  if (value.subjects.length > 100 || value.tasks.length > 2000) return false;
-  if (![value.semester, value.block, value.termStart, value.termEnd, value.createdAt].every((item) => isShortString(item))) return false;
-  if (typeof value.totalUnits !== "number" || !Number.isFinite(value.totalUnits) || value.totalUnits < 0 || value.totalUnits > 200) return false;
-  if (![value.profile.nickname, value.profile.program, value.profile.yearLevel].every((item) => isShortString(item))) return false;
-  if (value.exportTitle !== undefined && !isShortString(value.exportTitle, 120)) return false;
-  if (value.soundEffects !== undefined && typeof value.soundEffects !== "boolean") return false;
-  if (value.tourCompleted !== undefined && typeof value.tourCompleted !== "boolean") return false;
-  const validDays = new Set(DAY_META.map((day) => day.code));
-  const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-  const validSubjects = value.subjects.every((subject) => {
-    if (!isRecord(subject) || !isRecord(subject.meeting)) return false;
-    const meetings = Array.isArray(subject.meetings) && subject.meetings.length ? subject.meetings : [subject.meeting];
-    const validMeetings = meetings.length <= 14 && meetings.every((meeting) => isRecord(meeting) && Array.isArray(meeting.days) && meeting.days.length > 0
-      && meeting.days.length <= 7 && meeting.days.every((day) => typeof day === "string" && validDays.has(day as DayCode))
-      && isShortString(meeting.start, 5) && timePattern.test(meeting.start) && isShortString(meeting.end, 5)
-      && timePattern.test(meeting.end) && meeting.end > meeting.start && isShortString(meeting.room, 150));
-    return isShortString(subject.id, 100) && isShortString(subject.code, 50) && isShortString(subject.title, 300)
-      && isShortString(subject.color, 30) && typeof subject.units === "number" && Number.isFinite(subject.units)
-      && subject.units >= 0 && subject.units <= 20 && validMeetings;
-  });
-  if (!validSubjects) return false;
-  const subjectIds = new Set(value.subjects.map((subject) => subject.id));
-  return value.tasks.every((task) => isRecord(task) && isShortString(task.id, 100) && isShortString(task.subjectId, 100)
-    && subjectIds.has(task.subjectId) && isShortString(task.title, 500) && isShortString(task.dueAt, 40)
-    && !Number.isNaN(new Date(task.dueAt).getTime()) && typeof task.done === "boolean");
-}
 
 const SAMPLE = `Welcome to Adamson University
 Subject Enlistment
@@ -183,334 +64,11 @@ TF 14:00-15:30 SV217
 3
 Total Units : 12`;
 
-function uid(prefix = "id") {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function decodeDays(raw: string): DayCode[] {
-  const normalized = raw.trim().replace(/[,/&\-]/g, "");
-  const tokens: Array<[string, DayCode]> = [
-    ["Thursday", "TH"], ["Wednesday", "WE"], ["Tuesday", "TU"],
-    ["Monday", "MO"], ["Friday", "FR"], ["Saturday", "SA"], ["Sunday", "SU"],
-    ["Thu", "TH"], ["Th", "TH"], ["Wed", "WE"], ["Tue", "TU"],
-    ["Mon", "MO"], ["Fri", "FR"], ["Sat", "SA"], ["Sun", "SU"],
-    ["M", "MO"], ["T", "TU"], ["W", "WE"], ["F", "FR"], ["S", "SA"],
-  ];
-  const result: DayCode[] = [];
-  let cursor = normalized;
-  while (cursor.length) {
-    const found = tokens.find(([token]) => cursor.toLowerCase().startsWith(token.toLowerCase()));
-    if (!found) return [];
-    result.push(found[1]);
-    cursor = cursor.slice(found[0].length);
-  }
-  return [...new Set(result)];
-}
-
-function looksLikeTimetableGrid(text: string) {
-  const dayCount = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].filter((day) => new RegExp(`\\b${day}\\b`, "i").test(text)).length;
-  const timeCount = text.match(/\b\d{1,2}(?::|\.)\d{2}\s*(?:AM|PM)\b/gi)?.length || 0;
-  return dayCount >= 3 && (timeCount >= 4 || /\b(?:class schedule|timetable|time)\b/i.test(text));
-}
-
-function subjectMeetings(subject: Subject) {
-  return subject.meetings?.length ? subject.meetings : [subject.meeting];
-}
-
-function clockPart(raw: string) {
-  const match = raw.trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2] || 0);
-  if (hour < 1 || hour > 12 || minute > 59) return null;
-  return { hour, minute, suffix: match[3] || "" };
-}
-
-function flexibleTimeRange(startRaw: string, endRaw: string) {
-  const startPart = clockPart(startRaw);
-  const endPart = clockPart(endRaw);
-  if (!startPart || !endPart) return null;
-  const toMinutes = (part: NonNullable<ReturnType<typeof clockPart>>, suffix = part.suffix) => {
-    let hour = part.hour % 12;
-    if (suffix === "pm") hour += 12;
-    return hour * 60 + part.minute;
-  };
-  let end = toMinutes(endPart);
-  let start: number;
-  if (startPart.suffix) {
-    start = toMinutes(startPart);
-  } else if (endPart.suffix) {
-    const amCandidate = toMinutes(startPart, "am");
-    const pmCandidate = toMinutes(startPart, "pm");
-    start = pmCandidate < end && end - pmCandidate <= 6 * 60 ? pmCandidate : amCandidate;
-  } else {
-    start = toMinutes(startPart, startPart.hour === 12 ? "pm" : "am");
-  }
-  if (!endPart.suffix && end <= start) end += 12 * 60;
-  if (endPart.suffix && end <= start) end += 12 * 60;
-  if (start < 0 || end > 24 * 60 || end - start < 15 || end - start > 12 * 60) return null;
-  const format = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-  return { start: format(start), end: format(end) };
-}
-
-function parseFlexibleMeeting(line: string): Meeting | null {
-  const match = line.trim().match(/^([A-Za-z/&]+)\s*(?:-|:)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)(?:\s+(?:(?:room|rm)\s*[:#-]?\s*)?(.+))?$/i);
-  if (!match) return null;
-  const days = decodeDays(match[1]);
-  const times = flexibleTimeRange(match[2], match[3]);
-  if (!days.length || !times) return null;
-  const roomMatch = (match[4] || "").match(/^(?:(?:room|rm)\s*[:#-]?\s*)?(.+)$/i);
-  return { days, ...times, room: roomMatch?.[1]?.trim() || "TBA" };
-}
-
-function parseFlexibleSubjectList(lines: string[]): ParseResult | null {
-  const subjects: Subject[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const code = lines[index].replace(/\s+/g, " ").trim();
-    const meetingOnNextLine = parseFlexibleMeeting(lines[index + 1] || "");
-    const title = meetingOnNextLine ? code : (lines[index + 1] || "").replace(/\s+/g, " ").trim();
-    let cursor = meetingOnNextLine ? index + 1 : index + 2;
-    const meetings: Meeting[] = [];
-    while (cursor < lines.length) {
-      const meeting = parseFlexibleMeeting(lines[cursor]);
-      if (!meeting) break;
-      meetings.push(meeting);
-      cursor += 1;
-    }
-    if (!meetings.length || !code || !title || code.length > 60 || title.length > 300) continue;
-    subjects.push({
-      id: uid("sub"),
-      code: code.toUpperCase(),
-      title,
-      units: 0,
-      color: COLORS[subjects.length % COLORS.length],
-      meeting: meetings[0],
-      meetings,
-    });
-    index = cursor - 1;
-  }
-  if (!subjects.length) return null;
-  const semester = lines.find((line) => /(?:semester|term).*\d{4}\s*[-–]\s*\d{4}/i.test(line)) || "";
-  const block = lines.find((line) => /^(?:section|block)\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
-  return { semester, block, totalUnits: 0, program: "", yearLevel: "", subjects, warnings: ["Units were not included in this schedule and were saved as 0. Review every class before saving."] };
-}
-
-function parseEnrollment(text: string): { result?: ParseResult; issue?: ParseIssue } {
-  const cleaned = text.replace(/\r/g, "").replace(/\u00a0/g, " ").trim();
-  if (!cleaned) {
-    return { issue: { kind: "empty", title: "Nothing was pasted", detail: "Copy the Enrolled Subjects section from your Subject Enlistment page, then paste it here." } };
-  }
-
-  const lines = cleaned.split("\n").map((line) => line.trim()).filter(Boolean);
-  const lower = cleaned.toLowerCase();
-  const blockIndex = lines.findIndex((line) => /^Block\s*No\.?\s*:/i.test(line));
-  const totalIndex = lines.findIndex((line, index) => index > Math.max(blockIndex, -1) && /^Total\s+Units\s*:/i.test(line));
-
-  const firstSubjectIndex = lines.findIndex((line) => /^[A-Z]{2,}\s?\d{2,}[A-Z]?\s*:\s*.+/i.test(line));
-  if (firstSubjectIndex < 0) {
-    const flexibleResult = parseFlexibleSubjectList(lines);
-    if (flexibleResult) return { result: flexibleResult };
-    if (looksLikeTimetableGrid(cleaned)) {
-      return { issue: { kind: "timetable-grid", title: "This timetable needs its original layout", detail: TIMETABLE_GRID_DETAIL } };
-    }
-    if (/assessment of fees|tuition fee|total due|schedule of payment/i.test(lower)) {
-      return { issue: { kind: "fees-only", title: "This is the fees section", detail: "Copy the enrolled-subjects table instead. It should contain subject codes followed by class days, time, and room." } };
-    }
-    return { issue: { kind: "missing-table", title: "No class schedule was found", detail: "Paste the part that lists each subject code, class days, start and end time, room, and units." } };
-  }
-
-  const semester = lines.find((line) => /^\d+(?:st|nd|rd|th)\s+Semester\s+\d{4}-\d{4}$/i.test(line)) || "";
-  const program = lines.find((line) => /^(?:B\.?S\.?|B\.?A\.?|Bachelor|Master)/i.test(line)) || "";
-  const yearLevelLine = lines.find((line) => /(?:First|Second|Third|Fourth|Fifth)\s+Year/i.test(line)) || "";
-  const yearLevel = yearLevelLine.match(/(?:First|Second|Third|Fourth|Fifth)\s+Year/i)?.[0] || "";
-  const block = blockIndex >= 0 ? lines[blockIndex].split(":").slice(1).join(":").trim() : "";
-  const declaredUnits = totalIndex >= 0 ? Number(lines[totalIndex].match(/([\d.]+)\s*$/)?.[1] || 0) : 0;
-  const bodyStart = blockIndex >= 0 ? blockIndex + 1 : Math.max(0, firstSubjectIndex - 1);
-  const bodyEnd = totalIndex >= 0 ? totalIndex : lines.length;
-  const body = lines.slice(bodyStart, bodyEnd).filter((line) => !/^(Section|Subject|Units)$/i.test(line));
-  const subjects: Subject[] = [];
-  const warnings: string[] = [];
-
-  for (let index = 0; index < body.length; index += 1) {
-    const sectionId = body[index];
-    const subjectLine = body[index + 1] || "";
-    const match = subjectLine.match(/^([A-Z]{2,}\s?\d{2,}[A-Z]?)\s*:\s*(.+?)(?:\s+\((\d+)\))?$/i);
-    if (!/^\d{4,}$/.test(sectionId) || !match) continue;
-
-    const scheduleLine = body[index + 2] || "";
-    const unitsLine = body[index + 3] || "";
-    const schedule = scheduleLine.match(/^([A-Za-z]+)\s+(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})(?:\s+(.+))?$/);
-    const days = schedule ? decodeDays(schedule[1]) : [];
-    const units = /^\d+(?:\.\d+)?$/.test(unitsLine) ? Number(unitsLine) : 0;
-    if (!schedule || !days.length || !units) {
-      warnings.push(`${match[1].replace(/\s/g, "")} needs its days, time, or units checked.`);
-      continue;
-    }
-
-    subjects.push({
-      id: uid("sub"),
-      sectionId,
-      internalId: match[3],
-      code: match[1].replace(/\s/g, "").toUpperCase(),
-      title: match[2].replace(/\s+/g, " ").trim(),
-      units,
-      color: COLORS[subjects.length % COLORS.length],
-      meeting: { days, start: schedule[2], end: schedule[3], room: (schedule[4] || "TBA").trim() },
-    });
-    index += 3;
-  }
-
-  if (!subjects.length) {
-    const flexibleResult = parseFlexibleSubjectList(lines);
-    if (flexibleResult) return { result: flexibleResult };
-    if (looksLikeTimetableGrid(cleaned)) {
-      return { issue: { kind: "timetable-grid", title: "This timetable needs its original layout", detail: TIMETABLE_GRID_DETAIL } };
-    }
-    return { issue: { kind: "empty-table", title: "We found the table, but no complete subjects", detail: "Make sure each subject includes its code, class days, start and end time, room, and units." } };
-  }
-
-  const parsedUnits = subjects.reduce((sum, subject) => sum + subject.units, 0);
-  if (declaredUnits && parsedUnits !== declaredUnits) {
-    warnings.push(`The subjects add up to ${parsedUnits} units, but the page says ${declaredUnits}. Review the list before saving.`);
-  }
-  if (!semester) warnings.push("The semester label was not found. You can add it before saving.");
-
-  return { result: { semester, block, totalUnits: declaredUnits || parsedUnits, program, yearLevel, subjects, warnings } };
-}
-
-async function createLocalOcrWorker(onProgress: (message: string) => void) {
-  const { createWorker, PSM } = await import("tesseract.js");
-  const worker = await createWorker("eng", 1, {
-    workerPath: "/ocr/worker.min.js",
-    corePath: "/ocr/core",
-    langPath: "/ocr",
-    logger: (event) => {
-      if (event.status === "loading tesseract core") onProgress("Starting the local reader…");
-      else if (event.status === "loading language traineddata") onProgress("Loading the text reader…");
-      else if (event.status === "initializing api") onProgress("Almost ready…");
-      else if (event.status === "recognizing text") onProgress(`Reading timetable… ${Math.round((event.progress || 0) * 100)}%`);
-    },
-  });
-  await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: "1" });
-  return worker;
-}
-
-async function preparePhotoForOcr(file: File) {
-  const bitmap = await createImageBitmap(file);
-  const longestSide = Math.max(bitmap.width, bitmap.height);
-  const scale = Math.min(1, 2200 / longestSide);
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  const context = canvas.getContext("2d", { alpha: false });
-  if (!context) {
-    bitmap.close();
-    throw new Error("This browser could not prepare the photo.");
-  }
-  context.fillStyle = "white";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.filter = "grayscale(1) contrast(1.18)";
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  return canvas;
-}
-
-async function extractScheduleFile(file: File, onProgress: (message: string) => void) {
-  if (file.type.startsWith("image/")) {
-    onProgress("Optimizing the photo…");
-    const canvas = await preparePhotoForOcr(file);
-    const worker = await createLocalOcrWorker(onProgress);
-    try {
-      const result = await worker.recognize(canvas);
-      return result.data.text.trim();
-    } finally {
-      await worker.terminate();
-    }
-  }
-
-  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-    throw new Error("Choose a JPG, PNG, HEIC, WEBP, or PDF file.");
-  }
-
-  onProgress("Reading the PDF…");
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
-  const pdf = await loadingTask.promise;
-  if (pdf.numPages > 8) {
-    await loadingTask.destroy();
-    throw new Error("Choose a timetable PDF with 8 pages or fewer.");
-  }
-
-  try {
-    const pageLines: string[] = [];
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      onProgress(`Reading PDF page ${pageNumber} of ${pdf.numPages}…`);
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
-      const entries = content.items.flatMap((item) => {
-        if (!("str" in item) || !item.str.trim()) return [];
-        return [{ text: item.str.trim(), x: item.transform[4], y: item.transform[5] }];
-      }).sort((a, b) => Math.abs(b.y - a.y) > 3 ? b.y - a.y : a.x - b.x);
-      const rows: Array<{ y: number; cells: Array<{ x: number; text: string }> }> = [];
-      entries.forEach((entry) => {
-        const row = rows.find((candidate) => Math.abs(candidate.y - entry.y) <= 3);
-        if (row) row.cells.push({ x: entry.x, text: entry.text });
-        else rows.push({ y: entry.y, cells: [{ x: entry.x, text: entry.text }] });
-      });
-      pageLines.push(rows.sort((a, b) => b.y - a.y).map((row) => row.cells.sort((a, b) => a.x - b.x).map((cell) => cell.text).join(" ")).join("\n"));
-    }
-
-    const embeddedText = pageLines.join("\n").trim();
-    if (embeddedText.length >= 60) return embeddedText;
-
-    onProgress("This PDF is scanned. Reading it as an image…");
-    const worker = await createLocalOcrWorker(onProgress);
-    try {
-      const scannedPages: string[] = [];
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-        const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.6 });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.ceil(viewport.width);
-        canvas.height = Math.ceil(viewport.height);
-        const context = canvas.getContext("2d", { alpha: false });
-        if (!context) throw new Error("This browser could not prepare the PDF page.");
-        await page.render({ canvas, canvasContext: context, viewport }).promise;
-        onProgress(`Reading scanned page ${pageNumber} of ${pdf.numPages}…`);
-        const result = await worker.recognize(canvas);
-        scannedPages.push(result.data.text.trim());
-      }
-      return scannedPages.join("\n").trim();
-    } finally {
-      await worker.terminate();
-    }
-  } finally {
-    await loadingTask.destroy();
-  }
-}
-
-function formatTime(value: string) {
-  const [hour, minute] = value.split(":").map(Number);
-  const suffix = hour >= 12 ? "PM" : "AM";
-  const displayHour = hour % 12 || 12;
-  return `${displayHour}:${String(minute).padStart(2, "0")} ${suffix}`;
-}
-
-function dateKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
 function greeting(date = new Date()) {
   const hour = date.getHours();
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
-}
-
-function compactTitle(title: string, max = 42) {
-  const clean = title.replace(/\s+/g, " ").trim();
-  return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
 }
 
 function reviewMeetingSummary(subject: Subject) {
@@ -562,29 +120,6 @@ function playFeedbackTone(kind: "save" | "complete" | "delete" = "save") {
   });
 }
 
-function getSelectedDay(date: Date): DayCode {
-  return DAY_META.find((day) => day.js === date.getDay())?.code || "MO";
-}
-
-function nextClassDate(subject: Subject, after = new Date()) {
-  const candidates = subjectMeetings(subject).flatMap((meeting) => {
-    const [hour, minute] = meeting.start.split(":").map(Number);
-    const dates: Date[] = [];
-    for (let offset = 0; offset <= 14; offset += 1) {
-      const candidate = new Date(after);
-      candidate.setDate(after.getDate() + offset);
-      candidate.setHours(hour, minute, 0, 0);
-      if (meeting.days.includes(getSelectedDay(candidate)) && candidate > after) dates.push(candidate);
-    }
-    return dates;
-  });
-  return candidates.sort((a, b) => a.getTime() - b.getTime())[0] || null;
-}
-
-function escapeICS(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/;/g, "\\;").replace(/\n/g, "\\n");
-}
-
 function triggerDownload(content: BlobPart, type: string, filename: string) {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const anchor = document.createElement("a");
@@ -614,45 +149,6 @@ function canvasBlob(canvas: HTMLCanvasElement) {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return new Blob([bytes], { type: "image/png" });
-}
-
-function subjectIcon(subject: Subject): IconName {
-  if (subject.icon) return subject.icon;
-  const name = `${subject.code} ${subject.title}`.toLowerCase();
-  if (/research|thesis|project/.test(name)) return "flask";
-  if (/crypto|security|coding theory/.test(name)) return "key";
-  if (/parallel|distributed|comput/.test(name)) return "cpu";
-  if (/ethic|law|philosophy/.test(name)) return "balance";
-  if (/math|statistic|account|calculus|algebra/.test(name)) return "calculator";
-  if (/language|history|society|geograph|culture/.test(name)) return "globe";
-  return "book";
-}
-
-function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
-  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
-  if (name === "today") return <svg {...common}><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>;
-  if (name === "calendar") return <svg {...common}><rect x="4" y="5" width="16" height="15" rx="3" /><path d="M8 3v4M16 3v4M4 10h16M8 14h2M14 14h2M8 17h2" /></svg>;
-  if (name === "tasks") return <svg {...common}><rect x="4" y="4" width="16" height="16" rx="4" /><path d="m8 12 2.3 2.3L16 8.8" /></svg>;
-  if (name === "subjects" || name === "book") return <svg {...common}><path d="M5 5.5A3.5 3.5 0 0 1 8.5 2H19v16H8.5A3.5 3.5 0 0 0 5 21.5z" /><path d="M5 5.5v16M9 6h6M9 10h6" /></svg>;
-  if (name === "settings") return <svg {...common}><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" /></svg>;
-  if (name === "about") return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.2h.01" /></svg>;
-  if (name === "install") return <svg {...common}><path d="M12 3v11m0 0 4-4m-4 4-4-4" /><path d="M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" /></svg>;
-  if (name === "share") return <svg {...common}><rect x="5" y="9" width="14" height="12" rx="3" /><path d="M12 16V3m0 0L8 7m4-4 4 4" /></svg>;
-  if (name === "image") return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="9" cy="9" r="2" /><path d="m5 17 4-4 3 3 2-2 5 4" /></svg>;
-  if (name === "calendarAdd") return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M8 3v4M16 3v4M3 10h18M12 13v5M9.5 15.5h5" /></svg>;
-  if (name === "jump") return <svg {...common}><path d="M12 4v13m0 0 5-5m-5 5-5-5M6 21h12" /></svg>;
-  if (name === "backup") return <svg {...common}><path d="M12 4v10m0-10L8 8m4-4 4 4" /><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" /></svg>;
-  if (name === "profile") return <svg {...common}><circle cx="12" cy="8" r="4" /><path d="M5 21a7 7 0 0 1 14 0" /></svg>;
-  if (name === "trash") return <svg {...common}><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6" /></svg>;
-  if (name === "edit") return <svg {...common}><path d="m4 16-1 5 5-1L19 9l-4-4L4 16Z" /><path d="m13 7 4 4" /></svg>;
-  if (name === "sound") return <svg {...common}><path d="M5 10v4h4l5 4V6l-5 4H5Z" /><path d="M17 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /></svg>;
-  if (name === "flask") return <svg {...common}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M8 15h8" /></svg>;
-  if (name === "key") return <svg {...common}><circle cx="8" cy="12" r="4" /><path d="M12 12h9M17 12v3M20 12v2" /></svg>;
-  if (name === "cpu") return <svg {...common}><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 10h4v4h-4zM9 3v4M15 3v4M9 17v4M15 17v4M3 9h4M17 9h4M3 15h4M17 15h4" /></svg>;
-  if (name === "balance") return <svg {...common}><path d="M12 3v18M7 6h10M5 6l-3 6h6L5 6Zm14 0-3 6h6l-3-6ZM8 21h8" /></svg>;
-  if (name === "calculator") return <svg {...common}><rect x="5" y="3" width="14" height="18" rx="3" /><path d="M8 7h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4" /></svg>;
-  if (name === "globe") return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" /></svg>;
-  return <svg {...common}><path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="m5 11v5c3 3 11 3 14 0v-5M21 8v6" /></svg>;
 }
 
 export default function Home() {
@@ -1129,34 +625,7 @@ export default function Home() {
 
   async function exportICS() {
     if (!data) return;
-    const dayCodeMap: Record<DayCode, string> = { MO: "MO", TU: "TU", WE: "WE", TH: "TH", FR: "FR", SA: "SA", SU: "SU" };
-    const until = data.termEnd.replace(/-/g, "") + "T235959";
-    const events = data.subjects.flatMap((subject) => subjectMeetings(subject).map((meeting, meetingIndex) => {
-      const startBase = new Date(`${data.termStart}T00:00:00`);
-      let first: Date | null = null;
-      for (let offset = 0; offset < 7; offset += 1) {
-        const candidate = new Date(startBase);
-        candidate.setDate(startBase.getDate() + offset);
-        if (meeting.days.includes(getSelectedDay(candidate))) { first = candidate; break; }
-      }
-      if (!first) return "";
-      const compact = dateKey(first).replace(/-/g, "");
-      const start = meeting.start.replace(":", "") + "00";
-      const end = meeting.end.replace(":", "") + "00";
-      return [
-        "BEGIN:VEVENT",
-        `UID:${subject.id}-${meetingIndex}@anosked.local`,
-        `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`,
-        `DTSTART:${compact}T${start}`,
-        `DTEND:${compact}T${end}`,
-        `RRULE:FREQ=WEEKLY;BYDAY=${meeting.days.map((day) => dayCodeMap[day]).join(",")};UNTIL=${until}`,
-        `SUMMARY:${escapeICS(`${subject.title} · ${subject.code}`)}`,
-        `LOCATION:${escapeICS(meeting.room)}`,
-        "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT15M", `DESCRIPTION:${escapeICS(`${subject.code} starts in 15 minutes`)}`, "END:VALARM",
-        "END:VEVENT",
-      ].join("\r\n");
-    })).join("\r\n");
-    const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//AnoSked//Local Student Calendar//EN", "CALSCALE:GREGORIAN", events, "END:VCALENDAR"].join("\r\n");
+    const ics = buildICS(data);
     const filename = `AnoSked-${data.semester.replace(/\s+/g, "-")}.ics`;
     const result = await shareOrDownload(new Blob([ics], { type: "text/calendar;charset=utf-8" }), filename, "Add AnoSked? to your calendar");
     if (result !== "cancelled") {
@@ -1281,11 +750,12 @@ export default function Home() {
     });
   }
 
-  if (!hydrated) return <main className="loading-screen"><img className="brand-mark" src="/assets/AnoSkedicon.png" alt="" /><p>Preparing AnoSked…</p></main>;
+  if (!hydrated) return <main className="loading-screen" aria-live="polite"><img className="brand-mark" src="/assets/AnoSkedicon.png" alt="" /><p>Preparing AnoSked…</p></main>;
 
   if (!data) {
     return (
       <main className="onboarding-shell">
+        <a className="skip-link" href="#import">Skip to schedule setup</a>
         <header className="public-header">
           <a className="wordmark" href="#top" aria-label="AnoSked home"><img className="brand-mark small" src="/assets/default.webp" alt="" />AnoSked?</a>
           <button className="header-install" onClick={requestInstall}><Icon name="install" size={16} /> Add to Home Screen</button>
@@ -1340,7 +810,7 @@ export default function Home() {
                   <button className="back-button" onClick={() => setStage("paste")} aria-label="Go back">←</button>
                   <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects ready. Tap one to edit.</p></div><button className="review-add-class" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={14} /> Add class</button>
                 </div>
-                {parsed.warnings.map((warning) => <div className="warning-strip" key={warning}>! {warning}</div>)}
+                {parsed.warnings.map((warning) => <div className="warning-strip" role="status" key={warning}>{warning}</div>)}
                 <div className="review-list">
                   {parsed.subjects.map((subject) => {
                     const isOpen = openReviewSubjectId === subject.id;
@@ -1393,17 +863,18 @@ export default function Home() {
 
   return (
     <main className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
         <div className="wordmark app-wordmark"><img className="brand-mark small" src="/assets/default.webp" alt="" />AnoSked?</div>
-        <nav>
+        <nav aria-label="Primary navigation">
           {PRIMARY_NAV.map(({ key, label, icon }) => (
-            <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === "tasks" && data.tasks.filter((task) => !task.done).length > 0 ? <b>{data.tasks.filter((task) => !task.done).length}</b> : null}</button>
+            <button key={key} className={view === key ? "active" : ""} aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === "tasks" && data.tasks.filter((task) => !task.done).length > 0 ? <b aria-label={`${data.tasks.filter((task) => !task.done).length} open tasks`}>{data.tasks.filter((task) => !task.done).length}</b> : null}</button>
           ))}
         </nav>
-        <div className="sidebar-secondary"><button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><Icon name="settings" /><span>Settings</span></button><button className={view === "about" ? "active" : ""} onClick={() => setView("about")}><Icon name="about" /><span>About</span></button></div>
+        <div className="sidebar-secondary"><button className={view === "settings" ? "active" : ""} aria-current={view === "settings" ? "page" : undefined} onClick={() => setView("settings")}><Icon name="settings" /><span>Settings</span></button><button className={view === "about" ? "active" : ""} aria-current={view === "about" ? "page" : undefined} onClick={() => setView("about")}><Icon name="about" /><span>About</span></button></div>
       </aside>
 
-      <section className="app-main">
+      <section className="app-main" id="main-content" tabIndex={-1}>
         <header className="app-header">
           <span className="mobile-wordmark"><img src="/assets/default.webp" alt="" />AnoSked?</span>
           <button className="header-icon-button" onClick={() => setView("about")} aria-label="About AnoSked"><Icon name="about" /></button>
@@ -1450,9 +921,9 @@ export default function Home() {
             <div className="calendar-toolbar">
               <div><h1>Calendar</h1><p>See one day up close or your whole week at once.</p></div>
               <div className="calendar-actions">
-                <div className="view-switch" aria-label="Calendar view">
-                  <button className={calendarMode === "day" ? "active" : ""} onClick={() => setCalendarMode("day")}>Day</button>
-                  <button className={calendarMode === "week" ? "active" : ""} onClick={() => setCalendarMode("week")}>Week</button>
+                <div className="view-switch" role="group" aria-label="Calendar view">
+                  <button className={calendarMode === "day" ? "active" : ""} aria-pressed={calendarMode === "day"} onClick={() => setCalendarMode("day")}>Day</button>
+                  <button className={calendarMode === "week" ? "active" : ""} aria-pressed={calendarMode === "week"} onClick={() => setCalendarMode("week")}>Week</button>
                 </div>
                 <button className="quiet-button icon-button" onClick={exportICS}><Icon name="calendarAdd" size={17} /> Add to calendar</button>
                 <button className="sky-button icon-button" onClick={() => setShowExportSheet(true)}><Icon name="image" size={17} /> Save image</button>
@@ -1483,7 +954,7 @@ export default function Home() {
           <div className="page tasks-page">
             <div className="page-title-row mascot-title"><div><h1>Tasks</h1><p>{openTasks.length} open{overdueTasks.length ? ` · ${overdueTasks.length} overdue` : ""} · Keep each deadline connected to its subject.</p></div><img src="/assets/studying.webp" alt="AnoSked studying" /></div>
             <div className="tasks-layout">
-              <div className="task-composer"><div className="composer-heading"><h2>{editingTaskId ? "Edit task" : "New task"}</h2><p>{editingTaskId ? "Update what changed, then save." : "Three quick choices, then you’re done."}</p></div><label className="task-title-field">Task title<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} aria-label="Task title" placeholder="e.g. Finish the research introduction" /></label><div className="task-field-group"><span className="field-label">Subject</span><div className="task-subject-choices">{data.subjects.map((subject) => <button key={subject.id} className={taskSubject === subject.id ? "selected" : ""} onClick={() => setTaskSubject(subject.id)}><span style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={15} /></span><b>{subject.title}</b><small>{subject.code}</small></button>)}</div></div><div className="task-field-group"><span className="field-label">When is it due?</span><div className="quick-dates"><button onClick={setDueNextClass}>Next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>Tomorrow</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>In 7 days</button></div><button className={`due-date-button ${taskDue ? "has-value" : ""}`} onClick={() => setShowDuePicker(true)}><Icon name="calendar" size={17} /><span><small>Choose a date and time</small><strong>{taskDue ? new Date(taskDue).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "Not selected"}</strong></span><b>›</b></button></div><div className="task-submit-row">{editingTaskId && <button className="quiet-button" onClick={cancelTaskEdit}>Cancel</button>}<button className="primary-button" onClick={createTask}>{editingTaskId ? "Save changes" : "Add task"}</button></div></div>
+              <div className="task-composer"><div className="composer-heading"><h2>{editingTaskId ? "Edit task" : "New task"}</h2><p>{editingTaskId ? "Update what changed, then save." : "Three quick choices, then you’re done."}</p></div><label className="task-title-field">Task title<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g. Finish the research introduction" /></label><div className="task-field-group"><span className="field-label" id="task-subject-label">Subject</span><div className="task-subject-choices" role="group" aria-labelledby="task-subject-label">{data.subjects.map((subject) => <button key={subject.id} className={taskSubject === subject.id ? "selected" : ""} aria-pressed={taskSubject === subject.id} onClick={() => setTaskSubject(subject.id)}><span style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={15} /></span><b>{subject.title}</b><small>{subject.code}</small></button>)}</div></div><div className="task-field-group"><span className="field-label">When is it due?</span><div className="quick-dates"><button onClick={setDueNextClass}>Next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>Tomorrow</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>In 7 days</button></div><button className={`due-date-button ${taskDue ? "has-value" : ""}`} onClick={() => setShowDuePicker(true)} aria-haspopup="dialog"><Icon name="calendar" size={17} /><span><small>Choose a date and time</small><strong>{taskDue ? new Date(taskDue).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "Not selected"}</strong></span><b aria-hidden="true">›</b></button></div><div className="task-submit-row">{editingTaskId && <button className="quiet-button" onClick={cancelTaskEdit}>Cancel</button>}<button className="primary-button" onClick={createTask}>{editingTaskId ? "Save changes" : "Add task"}</button></div></div>
               <div className="task-list-card"><div className="section-heading"><h2>Your tasks</h2><span>{openTasks.length} open</span></div>{data.tasks.length ? [...data.tasks].sort((a, b) => {
                 if (a.done !== b.done) return a.done ? 1 : -1;
                 const aOverdue = new Date(a.dueAt).getTime() < clock.getTime();
@@ -1548,39 +1019,33 @@ export default function Home() {
         )}
       </section>
 
-      <nav className="mobile-nav">
-        {PRIMARY_NAV.map(({ key, label, icon }) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><Icon name={icon} size={18} /><span>{label}</span></button>)}
-        <button className={view === "settings" || view === "about" ? "active" : ""} onClick={() => setView("settings")}><Icon name="settings" size={18} /><span>Settings</span></button>
+      <nav className="mobile-nav" aria-label="Primary navigation">
+        {PRIMARY_NAV.map(({ key, label, icon }) => <button key={key} className={view === key ? "active" : ""} aria-current={view === key ? "page" : undefined} onClick={() => setView(key)}><Icon name={icon} size={18} /><span>{label}</span></button>)}
+        <button className={view === "settings" || view === "about" ? "active" : ""} aria-current={view === "settings" || view === "about" ? "page" : undefined} onClick={() => setView("settings")}><Icon name="settings" size={18} /><span>Settings</span></button>
       </nav>
       {confirmDelete && (
-        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmDelete(false); }}>
-          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+        <AccessibleDialog className="confirm-dialog" labelledBy="delete-title" describedBy="delete-description" onClose={() => setConfirmDelete(false)}>
             <img src="/assets/thinking.webp" alt="" />
             <h2 id="delete-title">Delete this schedule?</h2>
-            <p>Subjects and tasks will be removed from this device. A backup is the only way to restore them.</p>
+            <p id="delete-description">Subjects and tasks will be removed from this device. A backup is the only way to restore them.</p>
             <div><button className="quiet-button" onClick={() => setConfirmDelete(false)}>Cancel</button><button className="confirm-delete" onClick={() => { setConfirmDelete(false); setData(null); setStage("paste"); }}>Delete</button></div>
-          </div>
-        </div>
+        </AccessibleDialog>
       )}
       {taskPendingDelete && (
-        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setTaskPendingDelete(null); }}>
-          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-task-title">
+        <AccessibleDialog className="confirm-dialog" labelledBy="delete-task-title" describedBy="delete-task-description" onClose={() => setTaskPendingDelete(null)}>
             <img src="/assets/thinking.webp" alt="" />
             <h2 id="delete-task-title">Delete this task?</h2>
-            <p>“{compactTitle(taskPendingDelete.title, 64)}” will be removed from this device.</p>
+            <p id="delete-task-description">“{compactTitle(taskPendingDelete.title, 64)}” will be removed from this device.</p>
             <div><button className="quiet-button" onClick={() => setTaskPendingDelete(null)}>Keep task</button><button className="confirm-delete" onClick={deleteTask}>Delete task</button></div>
-          </div>
-        </div>
+        </AccessibleDialog>
       )}
       {subjectPendingDelete && (
-        <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSubjectPendingDelete(null); }}>
-          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-subject-title">
+        <AccessibleDialog className="confirm-dialog" labelledBy="delete-subject-title" describedBy="delete-subject-description" onClose={() => setSubjectPendingDelete(null)}>
             <img src="/assets/thinking.webp" alt="" />
             <h2 id="delete-subject-title">Delete this class?</h2>
-            <p>“{compactTitle(subjectPendingDelete.title, 64)}” and {(() => { const count = data.tasks.filter((task) => task.subjectId === subjectPendingDelete.id).length; return `${count} linked ${count === 1 ? "task" : "tasks"}`; })()} will be removed from this device.</p>
+            <p id="delete-subject-description">“{compactTitle(subjectPendingDelete.title, 64)}” and {(() => { const count = data.tasks.filter((task) => task.subjectId === subjectPendingDelete.id).length; return `${count} linked ${count === 1 ? "task" : "tasks"}`; })()} will be removed from this device.</p>
             <div><button className="quiet-button" onClick={() => setSubjectPendingDelete(null)}>Keep class</button><button className="confirm-delete" onClick={deleteSubject}>Delete class</button></div>
-          </div>
-        </div>
+        </AccessibleDialog>
       )}
       {showExportSheet && <ExportDialog onClose={() => setShowExportSheet(false)} onWallpaper={() => { setShowExportSheet(false); drawSchedule("wallpaper", "save"); }} onImage={() => { setShowExportSheet(false); drawSchedule("image", "save"); }} onShare={() => { setShowExportSheet(false); drawSchedule("image", "share"); }} />}
       {showSubjectForm && <SubjectDialog onClose={() => { setShowSubjectForm(false); setEditingSubject(null); }} onSave={saveSubject} color={editingSubject?.color || COLORS[data.subjects.length % COLORS.length]} initial={editingSubject || undefined} />}
@@ -1593,113 +1058,6 @@ export default function Home() {
       {notice && <BrandedToast message={notice} />}
     </main>
   );
-}
-
-function WeeklyTimetable({ subjects }: { subjects: Subject[] }) {
-  const timetableRef = useRef<HTMLDivElement>(null);
-  const [jumpVisible, setJumpVisible] = useState(false);
-  const firstHour = 7;
-  const lastHour = 22;
-  const hours = Array.from({ length: lastHour - firstHour + 1 }, (_, index) => firstHour + index);
-  const totalMinutes = (lastHour - firstHour) * 60;
-  const events = subjects.flatMap((subject) => subjectMeetings(subject).flatMap((meeting, meetingIndex) => meeting.days.map((day) => ({ subject, meeting, meetingIndex, day }))));
-  const earliest = [...events].sort((a, b) => a.meeting.start.localeCompare(b.meeting.start))[0];
-  const jumpKey = earliest ? `${earliest.subject.id}-${earliest.meetingIndex}-${earliest.day}` : "";
-  const earliestHour = earliest ? Number(earliest.meeting.start.split(":")[0]) : 0;
-  const shouldShowJump = earliestHour >= 12;
-
-  useEffect(() => {
-    const target = timetableRef.current?.querySelector(".jump-target");
-    if (!target || !shouldShowJump) {
-      setJumpVisible(false);
-      return;
-    }
-    const observer = new IntersectionObserver(([entry]) => setJumpVisible(!entry.isIntersecting), { threshold: .25 });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [jumpKey, shouldShowJump]);
-
-  function jumpToClasses() {
-    timetableRef.current?.querySelector(".jump-target")?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-
-  return (
-    <div className="weekly-view">
-      <div className="timetable-intro"><div><strong>Your weekly timetable</strong><span>{earliest ? `First class begins at ${formatTime(earliest.meeting.start).replace(":00", "")}.` : "No classes scheduled."}</span></div>{jumpVisible && <button className="jump-to-classes" onClick={jumpToClasses}><Icon name="jump" size={16} /> Jump to {formatTime(earliest.meeting.start).replace(":00", "")}</button>}</div>
-      <div className="timetable-shell" ref={timetableRef}>
-      <div className="timetable" aria-label="Weekly class timetable">
-        <div className="timetable-header">
-          <div className="time-corner" />
-          {DAY_META.map((day) => <div key={day.code}><strong>{day.short}</strong></div>)}
-        </div>
-        <div className="timetable-content">
-          <div className="time-axis">
-            {hours.slice(0, -1).map((hour) => <span key={hour} style={{ top: `${((hour - firstHour) / (lastHour - firstHour)) * 100}%` }}>{formatTime(`${String(hour).padStart(2, "0")}:00`).replace(":00", "")}</span>)}
-          </div>
-          <div className="schedule-grid">
-            <div className="day-columns">{DAY_META.map((day) => <i key={day.code} />)}</div>
-            <div className="hour-lines">{hours.map((hour) => <i key={hour} style={{ top: `${((hour - firstHour) / (lastHour - firstHour)) * 100}%` }} />)}</div>
-            {events.map(({ subject, meeting, meetingIndex, day }) => {
-              const dayIndex = DAY_META.findIndex((item) => item.code === day);
-              const [startHour, startMinute] = meeting.start.split(":").map(Number);
-              const [endHour, endMinute] = meeting.end.split(":").map(Number);
-              const start = Math.max(0, startHour * 60 + startMinute - firstHour * 60);
-              const end = Math.min(totalMinutes, endHour * 60 + endMinute - firstHour * 60);
-              if (end <= 0 || start >= totalMinutes || end <= start) return null;
-              return (
-                <div
-                  className={`schedule-block ${`${subject.id}-${meetingIndex}-${day}` === jumpKey ? "jump-target" : ""}`}
-                  key={`${subject.id}-${meetingIndex}-${day}`}
-                  style={{
-                    left: `calc(${dayIndex * (100 / 7)}% + 4px)`,
-                    width: `calc(${100 / 7}% - 8px)`,
-                    top: `calc(${(start / totalMinutes) * 100}% + 3px)`,
-                    height: `calc(${((end - start) / totalMinutes) * 100}% - 6px)`,
-                    background: subject.color,
-                  }}
-                >
-                  <strong>{subject.title}</strong>
-                  <span>{subject.code} · {meeting.room}</span>
-                  <small>{formatTime(meeting.start).replace(":00", "")}–{formatTime(meeting.end).replace(":00", "")}</small>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-    </div>
-  );
-}
-
-function DayStrip({ selectedDate, onSelect }: { selectedDate: Date; onSelect: (date: Date) => void }) {
-  const start = new Date(selectedDate);
-  const mondayOffset = (start.getDay() + 6) % 7;
-  start.setDate(start.getDate() - mondayOffset);
-  const days = Array.from({ length: 7 }, (_, index) => { const date = new Date(start); date.setDate(start.getDate() + index); return date; });
-  const moveWeek = (amount: number) => { const next = new Date(selectedDate); next.setDate(next.getDate() + amount * 7); onSelect(next); };
-  return <div className="week-picker"><button className="week-arrow" onClick={() => moveWeek(-1)} aria-label="Previous week" title="Previous week">‹</button><div className="day-strip" aria-label="Choose a day">{days.map((date) => { const selected = dateKey(date) === dateKey(selectedDate); const today = dateKey(date) === dateKey(new Date()); return <button key={dateKey(date)} className={`${selected ? "selected" : ""} ${today ? "is-today" : ""}`} onClick={() => onSelect(date)}><span>{date.toLocaleDateString("en-PH", { weekday: "short" })}</span><strong>{date.getDate()}</strong><i /></button>; })}</div><button className="week-arrow" onClick={() => moveWeek(1)} aria-label="Next week" title="Next week">›</button></div>;
-}
-
-function EmptyState({ title, detail }: { title: string; detail: string }) {
-  return <div className="empty-state"><img src="/assets/noclass.webp" alt="" /><h3>{title}</h3><p>{detail}</p></div>;
-}
-
-function ReviewTimeSelect({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  const options = REVIEW_TIME_OPTIONS.includes(value) ? REVIEW_TIME_OPTIONS : [...REVIEW_TIME_OPTIONS, value].sort();
-  return <label>{label}<select value={value} onChange={(event) => onChange(event.target.value)} aria-label={`${label} time`}>{options.map((time) => <option value={time} key={time}>{formatTime(time)}</option>)}</select></label>;
-}
-
-function ReviewDaysDialog({ days, onToggle, onClose }: { days: DayCode[]; onToggle: (day: DayCode) => void; onClose: () => void }) {
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog review-days-dialog" role="dialog" aria-modal="true" aria-labelledby="review-days-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><div className="due-dialog-heading"><span><Icon name="calendar" size={19} /></span><div><h2 id="review-days-title">Choose class days</h2><p>Turn days on or off if the imported schedule needs a correction.</p></div></div><div className="day-picker modal-day-picker"><span>Class days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={days.includes(day.code) ? "selected" : ""} aria-pressed={days.includes(day.code)} onClick={() => onToggle(day.code)}>{day.short}</button>)}</div></div><button className="sky-button wide-dialog" onClick={onClose}>Done</button></div></div>;
-}
-
-function IconPicker({ value, onChange, compact = false }: { value: IconName; onChange: (icon: IconName) => void; compact?: boolean }) {
-  return <div className={`icon-picker ${compact ? "compact" : ""}`}><span>{compact ? "Icon" : "Choose an icon"}</span><div>{SUBJECT_ICONS.map(({ icon, label }) => <button type="button" key={icon} className={value === icon ? "selected" : ""} onClick={() => onChange(icon)} aria-label={label} title={label}><Icon name={icon} size={compact ? 14 : 18} /></button>)}</div></div>;
-}
-
-function ColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
-  return <div className="color-picker"><span>Color</span><div>{COLORS.map((color) => <button type="button" key={color} className={value === color ? "selected" : ""} style={{ background: color }} onClick={() => onChange(color)} aria-label={`Use color ${color}`}><i /></button>)}</div></div>;
 }
 
 function DueDateDialog({ value, onClose, onSelect }: { value: string; onClose: () => void; onSelect: (value: string) => void }) {
@@ -1737,12 +1095,12 @@ function DueDateDialog({ value, onClose, onSelect }: { value: string; onClose: (
     setMonth(new Date(month.getFullYear(), month.getMonth() + offset, 1));
   }
 
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog due-date-dialog" role="dialog" aria-modal="true" aria-labelledby="due-date-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><div className="due-dialog-heading"><span><Icon name="calendar" size={20} /></span><div><h2 id="due-date-title">Choose a due date</h2><p>Pick a day, then choose a useful time.</p></div></div><div className="month-switcher"><button onClick={() => moveMonth(-1)} aria-label="Previous month">‹</button><strong>{month.toLocaleDateString("en-PH", { month: "long", year: "numeric" })}</strong><button onClick={() => moveMonth(1)} aria-label="Next month">›</button></div><div className="due-weekdays">{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div><div className="due-calendar-grid">{slots.map((day, index) => {
+  return <AccessibleDialog className="brand-dialog due-date-dialog" backdropClassName="policy-layer" labelledBy="due-date-title" describedBy="due-date-description" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><div className="due-dialog-heading"><span><Icon name="calendar" size={20} /></span><div><h2 id="due-date-title">Choose a due date</h2><p id="due-date-description">Pick a day, then choose a useful time.</p></div></div><div className="month-switcher"><button onClick={() => moveMonth(-1)} aria-label="Previous month">‹</button><strong aria-live="polite">{month.toLocaleDateString("en-PH", { month: "long", year: "numeric" })}</strong><button onClick={() => moveMonth(1)} aria-label="Next month">›</button></div><div className="due-weekdays" aria-hidden="true">{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div><div className="due-calendar-grid">{slots.map((day, index) => {
     if (!day) return <span key={`blank-${index}`} />;
     const key = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const disabled = key < today;
-    return <button key={key} className={selected === key ? "selected" : ""} disabled={disabled} onClick={() => setSelected(key)}>{day}</button>;
-  })}</div><span className="field-label due-time-label">Due time</span><div className="due-time-options">{timeOptions.map((option) => <button key={option.value} className={time === option.value ? "selected" : ""} onClick={() => setTime(option.value)}>{option.label}</button>)}</div><div className="custom-time-row"><span>Or set any time</span><div><select aria-label="Due hour" value={hour12} onChange={(event) => updateTime(Number(event.target.value), minuteValue, period)}>{Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <option key={hour}>{hour}</option>)}</select><span>:</span><select aria-label="Due minute" value={minuteValue} onChange={(event) => updateTime(hour12, event.target.value, period)}>{Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0")).map((minute) => <option key={minute}>{minute}</option>)}</select><select aria-label="AM or PM" value={period} onChange={(event) => updateTime(hour12, minuteValue, event.target.value)}><option>AM</option><option>PM</option></select></div></div><button className="sky-button wide-dialog" onClick={() => onSelect(`${selected}T${time}`)}>Use this due date</button></div></div>;
+    return <button key={key} className={selected === key ? "selected" : ""} disabled={disabled} aria-label={new Date(`${key}T12:00:00`).toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })} aria-pressed={selected === key} onClick={() => setSelected(key)}>{day}</button>;
+  })}</div><span className="field-label due-time-label">Due time</span><div className="due-time-options">{timeOptions.map((option) => <button key={option.value} className={time === option.value ? "selected" : ""} aria-pressed={time === option.value} onClick={() => setTime(option.value)}>{option.label}</button>)}</div><div className="custom-time-row"><span>Or set any time</span><div><select aria-label="Due hour" value={hour12} onChange={(event) => updateTime(Number(event.target.value), minuteValue, period)}>{Array.from({ length: 12 }, (_, index) => index + 1).map((hour) => <option key={hour}>{hour}</option>)}</select><span aria-hidden="true">:</span><select aria-label="Due minute" value={minuteValue} onChange={(event) => updateTime(hour12, event.target.value, period)}>{Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0")).map((minute) => <option key={minute}>{minute}</option>)}</select><select aria-label="AM or PM" value={period} onChange={(event) => updateTime(hour12, minuteValue, event.target.value)}><option>AM</option><option>PM</option></select></div></div><button className="sky-button wide-dialog" onClick={() => onSelect(`${selected}T${time}`)}>Use this due date</button></AccessibleDialog>;
 }
 
 function WelcomeTour({ onClose, onNavigate }: { onClose: () => void; onNavigate: (view: View) => void }) {
@@ -1757,7 +1115,7 @@ function WelcomeTour({ onClose, onNavigate }: { onClose: () => void; onNavigate:
     onNavigate("today");
     onClose();
   }
-  return <div className="dialog-backdrop tour-layer" role="presentation"><div className="brand-dialog welcome-tour" role="dialog" aria-modal="true" aria-labelledby="tour-title"><span className="tour-step-label">{step + 1} of {steps.length}</span><button className="tour-skip" onClick={onClose}>Skip</button><div className="tour-art">{steps.map((item, index) => <img src={item.image} alt="" key={item.image} className={index === step ? "active" : ""} aria-hidden={index !== step} />)}</div><h2 id="tour-title">{current.title}</h2><p>{current.detail}</p><div className="tour-dots" aria-label={`Step ${step + 1} of ${steps.length}`}>{steps.map((item, index) => <i key={item.title} className={index === step ? "active" : ""} />)}</div><div className={`tour-actions ${step === 0 ? "single" : ""}`}>{step > 0 && <button className="quiet-button" onClick={() => setStep(step - 1)}>Back</button>}{step < steps.length - 1 ? <button className="sky-button" onClick={() => setStep(step + 1)}>Next</button> : <button className="sky-button" onClick={finish}>Start my week</button>}</div></div></div>;
+  return <AccessibleDialog className="brand-dialog welcome-tour" backdropClassName="tour-layer" labelledBy="tour-title" describedBy="tour-description" onClose={onClose} closeOnBackdrop={false}><span className="tour-step-label" aria-live="polite">{step + 1} of {steps.length}</span><button className="tour-skip" onClick={onClose}>Skip</button><div className="tour-art">{steps.map((item, index) => <img src={item.image} alt="" key={item.image} className={index === step ? "active" : ""} aria-hidden={index !== step} />)}</div><h2 id="tour-title">{current.title}</h2><p id="tour-description">{current.detail}</p><div className="tour-dots" role="progressbar" aria-label="Welcome tour progress" aria-valuemin={1} aria-valuemax={steps.length} aria-valuenow={step + 1}>{steps.map((item, index) => <i key={item.title} className={index === step ? "active" : ""} />)}</div><div className={`tour-actions ${step === 0 ? "single" : ""}`}>{step > 0 && <button className="quiet-button" onClick={() => setStep(step - 1)}>Back</button>}{step < steps.length - 1 ? <button className="sky-button" onClick={() => setStep(step + 1)}>Next</button> : <button className="sky-button" onClick={finish}>Start my week</button>}</div></AccessibleDialog>;
 }
 
 function SubjectDialog({ onClose, onSave, color, initial }: { onClose: () => void; onSave: (subject: Subject) => void; color: string; initial?: Subject }) {
@@ -1785,7 +1143,7 @@ function SubjectDialog({ onClose, onSave, color, initial }: { onClose: () => voi
     onSave({ ...initial, id: initial?.id || uid("sub"), code: code.trim().toUpperCase() || "ACTIVITY", title: title.trim(), units: Math.max(0, Number(units) || 0), color: selectedColor, icon, meeting: normalizedMeetings[0], meetings: normalizedMeetings });
   }
 
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog subject-dialog" role="dialog" aria-modal="true" aria-labelledby="subject-dialog-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/studying.webp" alt="" /><h2 id="subject-dialog-title">{initial ? "Edit class or activity" : "Add a class or activity"}</h2><p>Keep the essentials together. You can add another meeting when the time changes on a different day.</p><div className="subject-form"><label className="wide-field">Name<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Robotics Club meeting" /></label><label>Code <small>Optional</small><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ORG" /></label><label>Units <small>Optional</small><input type="number" min="0" step="1" value={units} onChange={(event) => setUnits(event.target.value)} /></label><div className="wide-field subject-look-editor"><IconPicker value={icon} onChange={setIcon} /><ColorPicker value={selectedColor} onChange={setSelectedColor} /></div><div className="wide-field meeting-editors">{meetings.map((meeting, meetingIndex) => <section className="meeting-editor" key={meetingIndex}><header><strong>Meeting {meetingIndex + 1}</strong>{meetings.length > 1 && <button type="button" onClick={() => setMeetings((current) => current.filter((_, index) => index !== meetingIndex))}>Remove</button>}</header><div className="day-picker"><span>Days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={meeting.days.includes(day.code) ? "selected" : ""} onClick={() => toggleDay(meetingIndex, day.code)}>{day.short}</button>)}</div></div><div className="meeting-fields"><label>Starts<input type="time" value={meeting.start} onChange={(event) => updateMeeting(meetingIndex, "start", event.target.value)} /></label><label>Ends<input type="time" value={meeting.end} onChange={(event) => updateMeeting(meetingIndex, "end", event.target.value)} /></label><label>Room or place <small>Optional</small><input value={meeting.room === "TBA" ? "" : meeting.room} onChange={(event) => updateMeeting(meetingIndex, "room", event.target.value)} placeholder="e.g. Library" /></label></div></section>)}<button type="button" className="add-meeting-button" onClick={() => setMeetings((current) => [...current, { days: ["MO"], start: "08:00", end: "09:00", room: "TBA" }])}>+ Add another meeting</button></div></div>{error && <p className="form-error">{error}</p>}<button className="sky-button wide-dialog" onClick={submit}>{initial ? "Save changes" : "Add to my schedule"}</button></div></div>;
+  return <AccessibleDialog className="brand-dialog subject-dialog" backdropClassName="policy-layer" labelledBy="subject-dialog-title" describedBy="subject-dialog-description" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/studying.webp" alt="" /><h2 id="subject-dialog-title">{initial ? "Edit class or activity" : "Add a class or activity"}</h2><p id="subject-dialog-description">Keep the essentials together. You can add another meeting when the time changes on a different day.</p><div className="subject-form"><label className="wide-field">Name<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Robotics Club meeting" required /></label><label>Code <small>Optional</small><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ORG" /></label><label>Units <small>Optional</small><input type="number" min="0" max="20" step="1" value={units} onChange={(event) => setUnits(event.target.value)} /></label><div className="wide-field subject-look-editor"><IconPicker value={icon} onChange={setIcon} /><ColorPicker value={selectedColor} onChange={setSelectedColor} /></div><div className="wide-field meeting-editors">{meetings.map((meeting, meetingIndex) => <section className="meeting-editor" key={meetingIndex} aria-label={`Meeting ${meetingIndex + 1}`}><header><strong>Meeting {meetingIndex + 1}</strong>{meetings.length > 1 && <button type="button" onClick={() => setMeetings((current) => current.filter((_, index) => index !== meetingIndex))}>Remove</button>}</header><div className="day-picker"><span>Days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={meeting.days.includes(day.code) ? "selected" : ""} aria-pressed={meeting.days.includes(day.code)} onClick={() => toggleDay(meetingIndex, day.code)}>{day.short}</button>)}</div></div><div className="meeting-fields"><label>Starts<input type="time" value={meeting.start} onChange={(event) => updateMeeting(meetingIndex, "start", event.target.value)} /></label><label>Ends<input type="time" value={meeting.end} onChange={(event) => updateMeeting(meetingIndex, "end", event.target.value)} /></label><label>Room or place <small>Optional</small><input value={meeting.room === "TBA" ? "" : meeting.room} onChange={(event) => updateMeeting(meetingIndex, "room", event.target.value)} placeholder="e.g. Library" /></label></div></section>)}<button type="button" className="add-meeting-button" onClick={() => setMeetings((current) => [...current, { days: ["MO"], start: "08:00", end: "09:00", room: "TBA" }])}>+ Add another meeting</button></div></div>{error && <p className="form-error" role="alert">{error}</p>}<button className="sky-button wide-dialog" onClick={submit}>{initial ? "Save changes" : "Add to my schedule"}</button></AccessibleDialog>;
 }
 
 function ReportDialog({ onClose }: { onClose: () => void }) {
@@ -1801,27 +1159,27 @@ function ReportDialog({ onClose }: { onClose: () => void }) {
     setFeedback("Your email app should open with the report addressed to info.keyno@gmail.com.");
   }
 
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/thinking.png" alt="" /><h2 id="report-title">Report a problem</h2><p>Describe the issue and AnoSked will prepare an email to info.keyno@gmail.com. Nothing is sent until you review and send it.</p><label>What kind of problem?<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Something looks wrong</option><option>Schedule parsed incorrectly</option><option>A button does not work</option><option>Accessibility problem</option><option>Suggestion</option></select></label><label>What happened?<textarea value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="What did you expect, and what happened instead?" /></label>{feedback && <p className="report-feedback">{feedback}</p>}<button className="sky-button wide-dialog" onClick={prepareReport}>Open email report</button></div></div>;
+  return <AccessibleDialog className="brand-dialog report-dialog" backdropClassName="policy-layer" labelledBy="report-title" describedBy="report-description" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/thinking.webp" alt="" /><h2 id="report-title">Report a problem</h2><p id="report-description">Describe the issue and AnoSked will prepare an email to info.keyno@gmail.com. Nothing is sent until you review and send it.</p><label>What kind of problem?<select value={category} onChange={(event) => setCategory(event.target.value)}><option>Something looks wrong</option><option>Schedule parsed incorrectly</option><option>A button does not work</option><option>Accessibility problem</option><option>Suggestion</option></select></label><label>What happened?<textarea value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="What did you expect, and what happened instead?" /></label>{feedback && <p className="report-feedback" role="status">{feedback}</p>}<button className="sky-button wide-dialog" onClick={prepareReport}>Open email report</button></AccessibleDialog>;
 }
 
 function BrandedToast({ message }: { message: string }) {
-  return <div className="toast" role="status"><span className="toast-mascot"><img src="/assets/default.webp" alt="" /></span><span>{message}</span></div>;
+  return <div className="toast" role="status" aria-live="polite" aria-atomic="true"><span className="toast-mascot"><img src="/assets/default.webp" alt="" /></span><span>{message}</span></div>;
 }
 
 function InstallDialog({ onClose }: { onClose: () => void }) {
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog install-dialog" role="dialog" aria-modal="true" aria-labelledby="install-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.png" alt="" /><h2 id="install-title">Add AnoSked? to your Home Screen</h2><div className="install-steps"><div><b>iPhone or iPad</b><span>Open the Share menu, choose “Add to Home Screen,” then tap Add.</span></div><div><b>Android</b><span>Open your browser menu and choose “Install app” or “Add to Home screen.”</span></div></div><button className="sky-button wide-dialog" onClick={onClose}>Got it</button></div></div>;
+  return <AccessibleDialog className="brand-dialog install-dialog" labelledBy="install-title" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.webp" alt="" /><h2 id="install-title">Add AnoSked? to your Home Screen</h2><div className="install-steps"><div><b>iPhone or iPad</b><span>Open the Share menu, choose “Add to Home Screen,” then tap Add.</span></div><div><b>Android</b><span>Open your browser menu and choose “Install app” or “Add to Home screen.”</span></div></div><button className="sky-button wide-dialog" onClick={onClose}>Got it</button></AccessibleDialog>;
 }
 
 function ExportDialog({ onClose, onWallpaper, onImage, onShare }: { onClose: () => void; onWallpaper: () => void; onImage: () => void; onShare: () => void }) {
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.png" alt="" /><h2 id="export-title">Save your weekly timetable</h2><p>Save a file directly to your device, or open the separate sharing option.</p><div className="export-choices"><button onClick={onWallpaper}><Icon name="today" /><span><strong>Save iPhone wallpaper</strong><small>Leaves room for the Lock Screen clock and widgets</small></span></button><button onClick={onImage}><Icon name="image" /><span><strong>Save PNG image</strong><small>Downloads the weekly timetable to your device</small></span></button><button className="share-export-choice" onClick={onShare}><Icon name="share" /><span><strong>Share PNG image</strong><small>Opens your device’s sharing menu</small></span></button></div></div></div>;
+  return <AccessibleDialog className="brand-dialog export-dialog" labelledBy="export-title" describedBy="export-description" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/default.webp" alt="" /><h2 id="export-title">Save your weekly timetable</h2><p id="export-description">Save a file directly to your device, or open the separate sharing option.</p><div className="export-choices"><button onClick={onWallpaper}><Icon name="today" /><span><strong>Save iPhone wallpaper</strong><small>Leaves room for the Lock Screen clock and widgets</small></span></button><button onClick={onImage}><Icon name="image" /><span><strong>Save PNG image</strong><small>Downloads the weekly timetable to your device</small></span></button><button className="share-export-choice" onClick={onShare}><Icon name="share" /><span><strong>Share PNG image</strong><small>Opens your device’s sharing menu</small></span></button></div></AccessibleDialog>;
 }
 
 function PolicyDialog({ type, onClose }: { type: "privacy" | "terms"; onClose: () => void }) {
   const privacy = type === "privacy";
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog policy-dialog" role="dialog" aria-modal="true" aria-labelledby="policy-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><h2 id="policy-title">{privacy ? "Privacy Notice" : "Terms of Use"}</h2><p className="policy-date">Effective July 29, 2026</p>{privacy ? <div className="policy-copy"><h3>What stays on your device</h3><p>Enrollment text, selected timetable photos, and PDFs are processed inside your browser. Parsed subjects, tasks, optional profile labels, and your consent record are stored locally in this browser. AnoSked currently has no accounts, creator-accessible database, advertising tracker, or analytics tracker.</p><h3>What is ignored</h3><p>Student numbers, fees, balances, and payment details are not intentionally saved. Original pasted text and selected files are discarded after processing; AnoSked stores only the schedule you confirm.</p><h3>Deletion and exports</h3><p>Clearing browser data or deleting the installed app can remove everything. Backup, image, wallpaper, and calendar files leave AnoSked only when you choose to export them; the destination app then applies its own privacy practices.</p></div> : <div className="policy-copy"><h3>Use of AnoSked</h3><p>AnoSked is a convenience tool for organizing class information. Check important dates, rooms, and schedule changes against your school’s official records.</p><h3>Your responsibility</h3><p>You are responsible for reviewing parsed information, maintaining backups, and deciding what to export. AnoSked is provided as-is and may not recognize every enrollment format.</p><h3>Independence</h3><p>AnoSked is not affiliated with, endorsed by, or an official service of any university.</p></div>}<button className="sky-button wide-dialog" onClick={onClose}>Close</button></div></div>;
+  return <AccessibleDialog className="brand-dialog policy-dialog" backdropClassName="policy-layer" labelledBy="policy-title" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><h2 id="policy-title">{privacy ? "Privacy Notice" : "Terms of Use"}</h2><p className="policy-date">Effective July 29, 2026</p>{privacy ? <div className="policy-copy"><h3>What stays on your device</h3><p>Enrollment text, selected timetable photos, and PDFs are processed inside your browser. Parsed subjects, tasks, optional profile labels, and your consent record are stored locally in this browser. AnoSked currently has no accounts, creator-accessible database, advertising tracker, or analytics tracker.</p><h3>What is ignored</h3><p>Student numbers, fees, balances, and payment details are not intentionally saved. Original pasted text and selected files are discarded after processing; AnoSked stores only the schedule you confirm.</p><h3>Deletion and exports</h3><p>Clearing browser data or deleting the installed app can remove everything. Backup, image, wallpaper, and calendar files leave AnoSked only when you choose to export them; the destination app then applies its own privacy practices.</p></div> : <div className="policy-copy"><h3>Use of AnoSked</h3><p>AnoSked is a convenience tool for organizing class information. Check important dates, rooms, and schedule changes against your school’s official records.</p><h3>Your responsibility</h3><p>You are responsible for reviewing parsed information, maintaining backups, and deciding what to export. AnoSked is provided as-is and may not recognize every enrollment format.</p><h3>Independence</h3><p>AnoSked is not affiliated with, endorsed by, or an official service of any university.</p></div>}<button className="sky-button wide-dialog" onClick={onClose}>Close</button></AccessibleDialog>;
 }
 
 function ConsentDialog({ onAccept, onPolicy }: { onAccept: () => void; onPolicy: (policy: "privacy" | "terms") => void }) {
   const [checked, setChecked] = useState(false);
-  return <div className="dialog-backdrop consent-layer"><div className="brand-dialog consent-dialog" role="dialog" aria-modal="true" aria-labelledby="consent-title"><img src="/assets/default.png" alt="" /><h2 id="consent-title">Before you continue</h2><p>AnoSked stores your schedule on this device. Please review how it works and agree before using this saved schedule.</p><label className="consent-row"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => onPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => onPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="sky-button wide-dialog" disabled={!checked} onClick={onAccept}>Accept and continue</button></div></div>;
+  return <AccessibleDialog className="brand-dialog consent-dialog" backdropClassName="consent-layer" labelledBy="consent-title" describedBy="consent-description" closeOnBackdrop={false}><img src="/assets/default.webp" alt="" /><h2 id="consent-title">Before you continue</h2><p id="consent-description">AnoSked stores your schedule on this device. Please review how it works and agree before using this saved schedule.</p><label className="consent-row"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => onPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => onPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="sky-button wide-dialog" disabled={!checked} onClick={onAccept}>Accept and continue</button></AccessibleDialog>;
 }

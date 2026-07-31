@@ -2,12 +2,18 @@
   "name": "AnoSked?",
   "short_name": "AnoSked?",
   "description": "Your private, local student schedule.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "categories": ["education", "productivity"],
   "background_color": "#F4F8FB",
   "theme_color": "#89D0EF",
   "icons": [
-    { "src": "/assets/AnoSkedicon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+    { "src": "/assets/AnoSkedicon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/AnoSkedicon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/AnoSkedicon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
