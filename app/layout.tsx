@@ -31,5 +31,14 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return (
+    <html lang="en">
+      <head>
+        <link rel="preload" href="/assets/thinking.webp" as="image" type="image/webp" />
+        <link rel="preload" href="/assets/studying.webp" as="image" type="image/webp" />
+        <link rel="preload" href="/assets/checklist.webp" as="image" type="image/webp" />
+      </head>
+      <body>{children}</body>
+    </html>
+  );
 }
