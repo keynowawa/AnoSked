@@ -84,6 +84,7 @@ function reviewMeetingSummary(subject: Subject) {
 }
 
 function playFeedbackTone(kind: "save" | "complete" | "delete" = "save") {
+  if ("vibrate" in navigator) navigator.vibrate(kind === "complete" ? [22, 35, 28] : kind === "delete" ? [32, 38, 20] : 24);
   const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextClass) return;
   const context = new AudioContextClass();
@@ -105,10 +106,10 @@ function playFeedbackTone(kind: "save" | "complete" | "delete" = "save") {
     oscillator.frequency.setValueAtTime(tone.frequency, start);
     shimmer.frequency.setValueAtTime(tone.frequency * 2, start);
     gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.036, start + .018);
+    gain.gain.exponentialRampToValueAtTime(0.085, start + .018);
     gain.gain.exponentialRampToValueAtTime(0.0001, end);
     shimmerGain.gain.setValueAtTime(0.0001, start);
-    shimmerGain.gain.exponentialRampToValueAtTime(0.006, start + .014);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.014, start + .014);
     shimmerGain.gain.exponentialRampToValueAtTime(0.0001, end - .01);
     oscillator.connect(gain);
     shimmer.connect(shimmerGain);
@@ -226,7 +227,7 @@ export default function Home() {
       const resolved = appearance === "system" ? (media.matches ? "dark" : "light") : appearance;
       document.documentElement.dataset.theme = resolved;
       document.documentElement.style.colorScheme = resolved;
-      document.querySelector('meta[name="theme-color"]')?.setAttribute("content", resolved === "dark" ? "#10191E" : "#89D0EF");
+      document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.setAttribute("content", resolved === "dark" ? "#10191E" : "#89D0EF"));
     };
     applyAppearance();
     localStorage.setItem(APPEARANCE_KEY, appearance);
@@ -770,7 +771,7 @@ export default function Home() {
             ) : null}
           </div>
         </section>
-        <footer className="public-footer"><span>© 2026 AnoSked? · Created by Kyann Tagle</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button><button onClick={() => setShowInstallGuide(true)}>Install help</button></nav></footer>
+        <footer className="public-footer"><span>© 2026 AnoSked? · Created by mmmkay studios</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button><button onClick={() => setShowInstallGuide(true)}>Install help</button></nav></footer>
         {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
         {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onSave={addParsedSubject} color={COLORS[(parsed?.subjects.length || 0) % COLORS.length]} />}
         {reviewDayPicker && parsed && (() => {
@@ -910,11 +911,11 @@ export default function Home() {
               </details>
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="sound" size={17} /></i><span><strong>In-app sounds</strong><small>{data.soundEffects !== false ? "On for helpful confirmations" : "Off"}</small></span></span><b>›</b></summary>
-                <div className="setting-content sound-setting"><div className="sound-setting-copy"><strong>AnoSked? chime</strong><p>A soft signature sound confirms saves, completed tasks, and changes. Moving around the app stays quiet.</p></div><div className="sound-setting-controls"><button className="quiet-button" onClick={() => playFeedbackTone("complete")}>Play chime</button><button className={`switch-control ${data.soundEffects !== false ? "on" : ""}`} role="switch" aria-label="In-app sounds" aria-checked={data.soundEffects !== false} onClick={() => { const enabled = data.soundEffects === false; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div></div>
+                <div className="setting-content sound-setting"><div className="sound-setting-copy"><strong>AnoSked? chime</strong><p>A clear signature chime and a quick haptic tap on supported devices. Moving around the app stays quiet.</p></div><div className="sound-setting-controls"><button className="quiet-button" onClick={() => playFeedbackTone("complete")}>Play chime</button><button className={`switch-control ${data.soundEffects !== false ? "on" : ""}`} role="switch" aria-label="In-app sounds" aria-checked={data.soundEffects !== false} onClick={() => { const enabled = data.soundEffects === false; setData({ ...data, soundEffects: enabled }); if (enabled) playFeedbackTone(); }}><span /></button></div></div>
               </details>
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="appearance" size={17} /></i><span><strong>Appearance</strong><small>{appearance === "system" ? "Matches your device" : appearance === "dark" ? "Dark" : "Light"}</small></span></span><b>›</b></summary>
-                <div className="setting-content appearance-setting"><p>Choose what feels comfortable. Mascot artwork keeps its original colors.</p><div className="appearance-options" role="group" aria-label="Appearance"><button aria-pressed={appearance === "system"} className={appearance === "system" ? "selected" : ""} onClick={() => setAppearance("system")}>System</button><button aria-pressed={appearance === "light"} className={appearance === "light" ? "selected" : ""} onClick={() => setAppearance("light")}>Light</button><button aria-pressed={appearance === "dark"} className={appearance === "dark" ? "selected" : ""} onClick={() => setAppearance("dark")}>Dark</button></div></div>
+                <div className="setting-content appearance-setting"><p>Choose what feels comfortable.</p><div className="appearance-options" role="group" aria-label="Appearance"><button aria-pressed={appearance === "system"} className={appearance === "system" ? "selected" : ""} onClick={() => setAppearance("system")}>System</button><button aria-pressed={appearance === "light"} className={appearance === "light" ? "selected" : ""} onClick={() => setAppearance("light")}>Light</button><button aria-pressed={appearance === "dark"} className={appearance === "dark" ? "selected" : ""} onClick={() => setAppearance("dark")}>Dark</button></div></div>
               </details>
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="calendarAdd" size={17} /></i><span><strong>Class reminders</strong><small>Use dependable Apple or Google Calendar alerts</small></span></span><b>›</b></summary>
@@ -937,11 +938,11 @@ export default function Home() {
               <section><h2>Built to stay local</h2><p>Your pasted text, subjects, tasks, and optional profile stay in this browser. AnoSked has no account system, creator-accessible database, or analytics tracker.</p><button onClick={() => setPolicy("privacy")}>Read Privacy Notice</button></section>
               <section><h2>Keep your official record close</h2><p>AnoSked helps you read and remember your schedule, but your school’s official portal remains the source of truth.</p><button onClick={() => setPolicy("terms")}>Read Terms</button></section>
               <section><h2>Install when you’re ready</h2><p>Add AnoSked to your Home Screen for a full-screen, app-like experience on supported phones and tablets.</p><button onClick={requestInstall}><Icon name="install" size={15} /> Install AnoSked?</button></section>
-              <section><h2>Share it with a classmate</h2><p>Send a quick introduction and the official public link through your device’s sharing menu. Supported apps can show the AnoSked? logo as the link preview.</p><button onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></section>
+              <section><h2>Share it with a classmate</h2><p>Share AnoSked? through your device’s menu. It sends a quick introduction and the official link, while supported apps may show the AnoSked? logo in the preview.</p><button onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></section>
               <section><h2>Your consent</h2><p>Privacy Notice and Terms accepted {data.consent?.acceptedAt ? new Date(data.consent.acceptedAt).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }) : "on this device"}.</p></section>
               <section><h2>Found something off?</h2><p>Prepare a privacy-safe bug report and share it through any app you choose. AnoSked sends nothing automatically.</p><button onClick={() => setShowReport(true)}>Prepare bug report</button></section>
             </div>
-            <footer className="about-footer"><span>© 2026 Kyann Tagle. All rights reserved.</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button></nav></footer>
+            <footer className="about-footer"><span>© 2026 mmmkay studios. All rights reserved.</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button></nav></footer>
           </div>
         )}
       </section>
@@ -1109,7 +1110,7 @@ function ExportDialog({ data, onClose, onExport }: { data: SkedData; onClose: ()
       <div className={`schedule-preview ${mode}`}><img src={preview} alt={`${SCHEDULE_IMAGE_THEMES.find((item) => item.id === theme)?.label} ${mode === "wallpaper" ? "phone wallpaper" : "weekly timetable"} preview`} /></div>
       <div className="export-controls">
         <fieldset><legend>Format</legend><div className="export-segmented"><button className={mode === "wallpaper" ? "selected" : ""} aria-pressed={mode === "wallpaper"} onClick={() => setMode("wallpaper")}><Icon name="today" size={16} /> Wallpaper</button><button className={mode === "image" ? "selected" : ""} aria-pressed={mode === "image"} onClick={() => setMode("image")}><Icon name="image" size={16} /> Timetable</button></div></fieldset>
-        <fieldset><legend>Color</legend><div className="export-themes">{SCHEDULE_IMAGE_THEMES.map((item) => <button key={item.id} className={theme === item.id ? "selected" : ""} aria-pressed={theme === item.id} onClick={() => setTheme(item.id)}><i style={{ background: item.background }} /><span>{item.label}</span></button>)}</div></fieldset>
+        <fieldset><legend>Color</legend><div className="export-themes">{SCHEDULE_IMAGE_THEMES.map((item) => <button key={item.id} className={theme === item.id ? "selected" : ""} aria-pressed={theme === item.id} onClick={() => setTheme(item.id)}><i style={{ background: "backgroundEnd" in item ? `linear-gradient(135deg, ${item.background}, ${item.backgroundEnd})` : item.background }} /><span>{item.label}</span></button>)}</div></fieldset>
         <p className="export-size-note">{mode === "wallpaper" ? "Tall layout with clear space for your Lock Screen clock and widgets." : "Wide layout for sharing, printing, or keeping in Photos."}</p>
         <div className="export-actions"><button className="sky-button icon-button" onClick={() => onExport(mode, theme, "save")}><Icon name="install" size={16} /> Save to device</button><button className="quiet-button icon-button" onClick={() => onExport(mode, theme, "share")}><Icon name="share" size={16} /> Share</button></div>
       </div>

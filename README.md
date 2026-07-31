@@ -61,6 +61,6 @@ npm run vercel-build
 
 ## Creator
 
-Created by Kyann Tagle.
+Created by mmmkay studios.
 
-© 2026 Kyann Tagle. All rights reserved.
+© 2026 mmmkay studios. All rights reserved.

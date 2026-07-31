@@ -64,6 +64,7 @@ test("ships keyboard-safe dialogs and permits browser zoom", async () => {
   assert.match(dialog, /event\.key !== "Tab"/);
   assert.match(dialog, /aria-modal="true"/);
   assert.match(page, /className="skip-link"/);
+  assert.match(layout, /statusBarStyle: "black-translucent"/);
   assert.doesNotMatch(layout, /userScalable|maximumScale/);
 });
 
@@ -80,5 +81,9 @@ test("ships preview-first image exports and persistent appearance choices", asyn
   assert.match(page, /prefers-color-scheme: dark/);
   assert.match(styles, /:root\[data-theme="dark"\]/);
   assert.match(styles, /\.schedule-preview\.wallpaper/);
-  for (const theme of ["sky", "rose", "meadow", "sunshine"]) assert.match(imageModule, new RegExp(`id: "${theme}"`));
+  for (const theme of ["sky", "rose", "meadow", "sunshine", "midnight", "electric"]) assert.match(imageModule, new RegExp(`id: "${theme}"`));
+  assert.match(page, /navigator\.vibrate/);
+  assert.doesNotMatch(page, /Mascot artwork keeps its original colors/);
+  assert.match(page, /Created by mmmkay studios/);
+  assert.doesNotMatch(page, /Kyann Tagle/);
 });

@@ -1,14 +1,27 @@
 import { DAY_META, formatTime, subjectMeetings, type SkedData } from "./schedule";
 
 export type ScheduleImageMode = "image" | "wallpaper";
-export type ScheduleImageTheme = "sky" | "rose" | "meadow" | "sunshine";
+export type ScheduleImageTheme = "sky" | "rose" | "meadow" | "sunshine" | "midnight" | "electric";
+
+type ScheduleImageThemeDefinition = {
+  id: ScheduleImageTheme;
+  label: string;
+  background: string;
+  backgroundEnd?: string;
+  card: string;
+  ink: string;
+  muted: string;
+  grid: string;
+};
 
 export const SCHEDULE_IMAGE_THEMES = [
   { id: "sky", label: "Sky", background: "#EAF6FC", card: "rgba(255,255,255,.88)", ink: "#153A52", muted: "#56788D", grid: "rgba(71,128,158,.16)" },
   { id: "rose", label: "Rose", background: "#FBEFF3", card: "rgba(255,255,255,.88)", ink: "#55343F", muted: "#8A6571", grid: "rgba(142,92,109,.16)" },
   { id: "meadow", label: "Meadow", background: "#EDF7F0", card: "rgba(255,255,255,.88)", ink: "#274B3B", muted: "#628171", grid: "rgba(70,123,95,.16)" },
   { id: "sunshine", label: "Sunshine", background: "#FFF7DD", card: "rgba(255,255,255,.88)", ink: "#594920", muted: "#8B7745", grid: "rgba(145,116,49,.16)" },
-] as const satisfies ReadonlyArray<{ id: ScheduleImageTheme; label: string; background: string; card: string; ink: string; muted: string; grid: string }>;
+  { id: "midnight", label: "Midnight", background: "#101B2D", backgroundEnd: "#172D46", card: "rgba(28,43,64,.94)", ink: "#F3F7FF", muted: "#AFC3E2", grid: "rgba(190,210,240,.16)" },
+  { id: "electric", label: "Electric", background: "#281B46", backgroundEnd: "#183F55", card: "rgba(45,35,75,.93)", ink: "#FAF7FF", muted: "#C8BEEA", grid: "rgba(214,202,244,.17)" },
+] as const satisfies ReadonlyArray<ScheduleImageThemeDefinition>;
 
 export function renderScheduleCanvas(data: SkedData, mode: ScheduleImageMode, themeId: ScheduleImageTheme) {
   const canvas = document.createElement("canvas");
@@ -39,7 +52,12 @@ export function renderScheduleCanvas(data: SkedData, mode: ScheduleImageMode, th
   const hourHeight = gridHeight / hourSpan;
   const dayWidth = gridWidth / Math.max(1, days.length);
 
-  ctx.fillStyle = theme.background;
+  if ("backgroundEnd" in theme && theme.backgroundEnd) {
+    const background = ctx.createLinearGradient(0, 0, width, height);
+    background.addColorStop(0, theme.background);
+    background.addColorStop(1, theme.backgroundEnd);
+    ctx.fillStyle = background;
+  } else ctx.fillStyle = theme.background;
   ctx.fillRect(0, 0, width, height);
   ctx.textAlign = "center";
   ctx.fillStyle = theme.ink;
