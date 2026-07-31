@@ -22,7 +22,7 @@ type InstallPromptEvent = Event & {
 
 const STORAGE_KEY = "anosked.local.v1";
 const APPEARANCE_KEY = "anosked.appearance.v1";
-const SHARE_URL = "https://anosked.vercel.app";
+const SHARE_URL = "https://anosked.site";
 const SHARE_MESSAGE = `Meet AnoSked? 📅
 
 Paste your enrolled subjects and turn them into a clear daily timeline and weekly schedule in seconds. Save your timetable as a phone wallpaper, add tasks under each subject, and install AnoSked? on your Home Screen for quick access.

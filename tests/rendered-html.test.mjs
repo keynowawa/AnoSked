@@ -42,6 +42,8 @@ test("keeps local data, install metadata, and offline imports constrained", asyn
   assert.match(scheduleCore, /function isValidStoredData/);
   assert.match(page, /file\.size > 2_000_000/);
   assert.match(page, /localStorage\.setItem\(STORAGE_KEY/);
+  assert.match(page, /const SHARE_URL = "https:\/\/anosked\.site"/);
+  assert.doesNotMatch(page, /anosked\.vercel\.app/);
   assert.doesNotMatch(page, /dangerouslySetInnerHTML|\beval\s*\(/);
   assert.match(serviceWorker, /url\.origin !== self\.location\.origin/);
   assert.match(serviceWorker, /event\.request\.mode === "navigate"/);
