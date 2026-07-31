@@ -665,6 +665,7 @@ export default function Home() {
   const [fileImportStatus, setFileImportStatus] = useState("");
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [openReviewSubjectId, setOpenReviewSubjectId] = useState<string | null>(null);
+  const [reviewDayPicker, setReviewDayPicker] = useState<{ subjectId: string; meetingIndex: number } | null>(null);
   const [profile, setProfile] = useState<Profile>({ nickname: "", program: "", yearLevel: "" });
   const [termStart, setTermStart] = useState("");
   const [termEnd, setTermEnd] = useState("");
@@ -981,6 +982,24 @@ export default function Home() {
       if (subject.id !== id) return subject;
       const meetings = subjectMeetings(subject).map((meeting, index) => index === meetingIndex ? { ...meeting, [field]: value } : meeting);
       return { ...subject, meeting: meetings[0], meetings };
+    }) });
+  }
+
+  function toggleParsedMeetingDay(id: string, meetingIndex: number, day: DayCode) {
+    if (!parsed) return;
+    const subject = parsed.subjects.find((item) => item.id === id);
+    const meeting = subject ? subjectMeetings(subject)[meetingIndex] : undefined;
+    if (!meeting) return;
+    if (meeting.days.includes(day) && meeting.days.length === 1) {
+      setNotice("Keep at least one class day selected.");
+      return;
+    }
+    const days = meeting.days.includes(day) ? meeting.days.filter((item) => item !== day) : [...meeting.days, day];
+    days.sort((a, b) => DAY_META.findIndex((item) => item.code === a) - DAY_META.findIndex((item) => item.code === b));
+    setParsed({ ...parsed, subjects: parsed.subjects.map((item) => {
+      if (item.id !== id) return item;
+      const meetings = subjectMeetings(item).map((current, index) => index === meetingIndex ? { ...current, days } : current);
+      return { ...item, meeting: meetings[0], meetings };
     }) });
   }
 
@@ -1337,7 +1356,7 @@ export default function Home() {
                         </div>
                         {isOpen && <div className="review-fields" id={`review-subject-${subject.id}`}>
                           <div className="inline-fields"><label className="subject-code-input">Subject code<span><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><i style={{ background: subject.color }} /></span></label><label>Subject name<input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject name" /></label></div>
-                          <div className="review-meetings">{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="schedule-edit" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><div className="meeting-day-field"><span>Days</span><div className="meeting-identity"><strong>{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</strong></div></div><div className="meeting-time-range"><ReviewTimeSelect label="Starts" value={meeting.start} onChange={(value) => updateParsedMeeting(subject.id, meetingIndex, "start", value)} /><ReviewTimeSelect label="Ends" value={meeting.end} onChange={(value) => updateParsedMeeting(subject.id, meetingIndex, "end", value)} /></div><label className="meeting-room-field">Room<input value={meeting.room} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "room", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} room`} /></label></div>)}</div>
+                          <div className="review-meetings">{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="schedule-edit" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><div className="meeting-day-field"><span>Days</span><button type="button" className="meeting-days-button" onClick={() => setReviewDayPicker({ subjectId: subject.id, meetingIndex })} aria-label={`Edit class days for ${subject.code}`}><strong>{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</strong><i aria-hidden="true" /></button></div><div className="meeting-time-range"><ReviewTimeSelect label="Starts" value={meeting.start} onChange={(value) => updateParsedMeeting(subject.id, meetingIndex, "start", value)} /><ReviewTimeSelect label="Ends" value={meeting.end} onChange={(value) => updateParsedMeeting(subject.id, meetingIndex, "end", value)} /></div><label className="meeting-room-field">Room<input value={meeting.room} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "room", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} room`} /></label></div>)}</div>
                           <details className="review-customize"><summary><span>Icon and color</span><span className="review-look-preview"><Icon name={subject.icon || subjectIcon(subject)} size={14} /><i style={{ background: subject.color }} /><b>›</b></span></summary><div className="review-customize-panel"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div></details>
                         </div>}
                       </article>
@@ -1347,10 +1366,10 @@ export default function Home() {
                 <div className="review-section">
                   <h3>Confirm the semester</h3><p>Add anything the imported schedule did not include.</p>
                   <div className="term-fields single-field"><label>Term or semester<input value={parsed.semester} onChange={(event) => setParsed({ ...parsed, semester: event.target.value })} placeholder="e.g. 1st Term 2026–2027" /></label></div>
-                  <div className="date-fields"><label>Classes start<input type="date" value={termStart} onChange={(e) => setTermStart(e.target.value)} /></label><label>Classes end<input type="date" value={termEnd} onChange={(e) => setTermEnd(e.target.value)} /></label></div>
+                  <div className="date-fields"><label>Classes start<span className="date-input-shell"><input type="date" value={termStart} onChange={(e) => setTermStart(e.target.value)} /><i aria-hidden="true" /></span></label><label>Classes end<span className="date-input-shell"><input type="date" value={termEnd} onChange={(e) => setTermEnd(e.target.value)} /><i aria-hidden="true" /></span></label></div>
                 </div>
                 <details className="optional-profile">
-                  <summary><span><Icon name="profile" size={15} /> Optional details</span><b>›</b></summary>
+                  <summary><span><Icon name="settings" size={15} /> Optional details</span><b>›</b></summary>
                   <div className="profile-fields"><label>Section or block<input value={parsed.block} onChange={(event) => setParsed({ ...parsed, block: event.target.value })} placeholder="e.g. 4CSD" /></label><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Optional" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} placeholder="Optional" /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} placeholder="Optional" /></label></div>
                 </details>
                 <div className="review-save-dock"><label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="primary-button" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button></div>
@@ -1361,6 +1380,11 @@ export default function Home() {
         <footer className="public-footer"><span>© 2026 AnoSked? · Created by Kyann Tagle</span><nav><button onClick={() => setPolicy("privacy")}>Privacy</button><button onClick={() => setPolicy("terms")}>Terms</button><button onClick={() => setShowInstallGuide(true)}>Install help</button></nav></footer>
         {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
         {showSubjectForm && <SubjectDialog onClose={() => setShowSubjectForm(false)} onSave={addParsedSubject} color={COLORS[(parsed?.subjects.length || 0) % COLORS.length]} />}
+        {reviewDayPicker && parsed && (() => {
+          const subject = parsed.subjects.find((item) => item.id === reviewDayPicker.subjectId);
+          const meeting = subject ? subjectMeetings(subject)[reviewDayPicker.meetingIndex] : undefined;
+          return meeting ? <ReviewDaysDialog days={meeting.days} onToggle={(day) => toggleParsedMeetingDay(reviewDayPicker.subjectId, reviewDayPicker.meetingIndex, day)} onClose={() => setReviewDayPicker(null)} /> : null;
+        })()}
         {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
         {notice && <BrandedToast message={notice} />}
       </main>
@@ -1664,6 +1688,10 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
 function ReviewTimeSelect({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   const options = REVIEW_TIME_OPTIONS.includes(value) ? REVIEW_TIME_OPTIONS : [...REVIEW_TIME_OPTIONS, value].sort();
   return <label>{label}<select value={value} onChange={(event) => onChange(event.target.value)} aria-label={`${label} time`}>{options.map((time) => <option value={time} key={time}>{formatTime(time)}</option>)}</select></label>;
+}
+
+function ReviewDaysDialog({ days, onToggle, onClose }: { days: DayCode[]; onToggle: (day: DayCode) => void; onClose: () => void }) {
+  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog review-days-dialog" role="dialog" aria-modal="true" aria-labelledby="review-days-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><div className="due-dialog-heading"><span><Icon name="calendar" size={19} /></span><div><h2 id="review-days-title">Choose class days</h2><p>Turn days on or off if the imported schedule needs a correction.</p></div></div><div className="day-picker modal-day-picker"><span>Class days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={days.includes(day.code) ? "selected" : ""} aria-pressed={days.includes(day.code)} onClick={() => onToggle(day.code)}>{day.short}</button>)}</div></div><button className="sky-button wide-dialog" onClick={onClose}>Done</button></div></div>;
 }
 
 function IconPicker({ value, onChange, compact = false }: { value: IconName; onChange: (icon: IconName) => void; compact?: boolean }) {
