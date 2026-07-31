@@ -139,7 +139,7 @@ export function isValidStoredData(value: unknown): value is SkedData {
 }
 
 export function decodeDays(raw: string): DayCode[] {
-  const normalized = raw.trim().replace(/[,/&\-]/g, "");
+  const normalized = raw.trim().replace(/[\s,/&\-]/g, "");
   const tokens: Array<[string, DayCode]> = [
     ["Thursday", "TH"], ["Wednesday", "WE"], ["Tuesday", "TU"], ["Monday", "MO"],
     ["Friday", "FR"], ["Saturday", "SA"], ["Sunday", "SU"], ["Thu", "TH"], ["Th", "TH"],
@@ -209,6 +209,96 @@ export function parseFlexibleMeeting(line: string): Meeting | null {
   return { days, ...times, room: roomMatch?.[1]?.trim() || "TBA" };
 }
 
+function fixedWidthTimeRange(raw: string) {
+  const match = raw.trim().match(/^(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const startHour = Number(match[1]);
+  const startMinute = Number(match[2]);
+  const endHour = Number(match[3]);
+  const endMinute = Number(match[4]);
+  if (startHour > 23 || endHour > 23 || startMinute > 59 || endMinute > 59) return null;
+  const startTotal = startHour * 60 + startMinute;
+  const endTotal = endHour * 60 + endMinute;
+  if (endTotal <= startTotal || endTotal - startTotal > 12 * 60) return null;
+  return {
+    start: `${String(startHour).padStart(2, "0")}:${String(startMinute).padStart(2, "0")}`,
+    end: `${String(endHour).padStart(2, "0")}:${String(endMinute).padStart(2, "0")}`,
+  };
+}
+
+export function parseFixedWidthSubjectTable(lines: string[]): ParseResult | null {
+  const subjects: Subject[] = [];
+  for (const line of lines) {
+    const columns = line.trim().split(/(?:\t+|\s{2,})/).map((column) => column.trim()).filter(Boolean);
+    if (columns.length < 5) continue;
+    const [code, title, rawDays, rawTime] = columns;
+    if (!/^[A-Z][A-Z0-9_]*(?:\s+[A-Z0-9_]+){0,3}$/i.test(code) || /^code$/i.test(code)) continue;
+    const days = decodeDays(rawDays);
+    const times = fixedWidthTimeRange(rawTime);
+    if (!days.length || !times || !title) continue;
+    const trailing = columns.slice(4);
+    const hasUnits = trailing.length > 1 && /^\d+(?:\.\d+)?$/.test(trailing.at(-1) || "");
+    const units = hasUnits ? Number(trailing.pop()) : 0;
+    const room = trailing.join(" ").trim() || "TBA";
+    subjects.push({
+      id: uid("sub"), code: code.toUpperCase(), title: title.replace(/\s+/g, " ").trim(), units,
+      color: COLORS[subjects.length % COLORS.length], meeting: { days, ...times, room },
+    });
+  }
+  if (!subjects.length) return null;
+  const semester = lines.find((line) => /(?:semester|term).*\d{4}\s*[-–]\s*\d{4}/i.test(line)) || "";
+  const block = lines.find((line) => /^block\s*no\.?\s*:/i.test(line))?.split(":").slice(1).join(":").trim()
+    || lines.find((line) => /^section\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
+  const declaredUnits = Number(lines.find((line) => /^total\s+units\s*:/i.test(line))?.match(/([\d.]+)\s*$/)?.[1] || 0);
+  const parsedUnits = subjects.reduce((sum, subject) => sum + subject.units, 0);
+  const warnings: string[] = [];
+  if (subjects.some((subject) => subject.units === 0)) warnings.push("Per-subject units were not listed and were saved as 0. Your classes and meeting times are ready to review.");
+  if (!semester) warnings.push("The semester label was not found. You can add it before saving.");
+  return { semester, block, totalUnits: declaredUnits || parsedUnits, program: "", yearLevel: "", subjects, warnings };
+}
+
+function generatedSubjectCode(title: string, index: number) {
+  const tokens = title.toUpperCase().match(/[A-Z]+|\d+/g) || [];
+  const code = tokens.map((token) => /^\d+$/.test(token) || token.length <= 2 ? token : token[0]).join("").slice(0, 12);
+  return code || `CLASS${index + 1}`;
+}
+
+export function parseGroupedDaySchedule(lines: string[]): ParseResult | null {
+  const subjects: Subject[] = [];
+  let currentDays: DayCode[] = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const heading = line.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, "").trim();
+    if (heading && /^[A-Za-z\s&,/-]+$/.test(heading)) {
+      const decoded = decodeDays(heading);
+      if (decoded.length) {
+        currentDays = decoded;
+        continue;
+      }
+    }
+    if (!currentDays.length) continue;
+    const match = line.match(/^[•●▪]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*[-–—]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*\|\s*(.+)$/i);
+    if (!match) continue;
+    const times = flexibleTimeRange(match[1], match[2]);
+    if (!times) continue;
+    const detail = match[3].trim();
+    const roomMatch = detail.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
+    const title = (roomMatch?.[1] || detail).trim();
+    const room = roomMatch?.[2]?.trim() || "TBA";
+    subjects.push({
+      id: uid("sub"), code: generatedSubjectCode(title, subjects.length), title, units: 0,
+      color: COLORS[subjects.length % COLORS.length], meeting: { days: [...currentDays], ...times, room },
+    });
+  }
+  if (!subjects.length) return null;
+  const semesterSource = lines.find((line) => /(?:semester|\bsem\b)/i.test(line)) || "";
+  const semester = semesterSource.match(/\d+(?:st|nd|rd|th)\s+(?:semester|sem)\b/i)?.[0] || "";
+  return {
+    semester, block: "", totalUnits: 0, program: "", yearLevel: "", subjects,
+    warnings: ["Subject codes and units were not included. AnoSked created short editable codes and saved units as 0. Review them before saving."],
+  };
+}
+
 export function parseFlexibleSubjectList(lines: string[]): ParseResult | null {
   const subjects: Subject[] = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -247,6 +337,10 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
   const firstSubjectIndex = lines.findIndex((line) => /^[A-Z]{2,}\s?\d{2,}[A-Z]?\s*:\s*.+/i.test(line));
 
   if (firstSubjectIndex < 0) {
+    const groupedDayResult = parseGroupedDaySchedule(lines);
+    if (groupedDayResult) return { result: groupedDayResult };
+    const fixedWidthResult = parseFixedWidthSubjectTable(lines);
+    if (fixedWidthResult) return { result: fixedWidthResult };
     const flexibleResult = parseFlexibleSubjectList(lines);
     if (flexibleResult) return { result: flexibleResult };
     if (looksLikeTimetableGrid(cleaned)) return { issue: { kind: "timetable-grid", title: "This timetable needs its original layout", detail: TIMETABLE_GRID_DETAIL } };
@@ -289,6 +383,10 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
   }
 
   if (!subjects.length) {
+    const groupedDayResult = parseGroupedDaySchedule(lines);
+    if (groupedDayResult) return { result: groupedDayResult };
+    const fixedWidthResult = parseFixedWidthSubjectTable(lines);
+    if (fixedWidthResult) return { result: fixedWidthResult };
     const flexibleResult = parseFlexibleSubjectList(lines);
     if (flexibleResult) return { result: flexibleResult };
     if (looksLikeTimetableGrid(cleaned)) return { issue: { kind: "timetable-grid", title: "This timetable needs its original layout", detail: TIMETABLE_GRID_DETAIL } };

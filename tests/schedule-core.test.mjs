@@ -63,6 +63,35 @@ LIWORIZ
 LIFE AND WORKS OF RIZAL
 MW 7-8:30 Room 1909`;
 
+const FIXED_WIDTH_SAMPLE = `Block No. : CS 405
+Section: 4-1
+================================================================================
+Code    Subject Description                           Days   Time          Room
+================================================================================
+CS420   CS RESEARCH PROJECT 2                         Wed    14:00-17:00   SV217
+CS467   PE - CODING THEORY AND CRYPTOLOGY             MTh    10:30-12:00   SV213
+CS468   PE - PARALLEL AND DISTRIBUTED COMPUTING       MTh    13:00-14:30   SV215
+CS472   PE - INTRODUCTION TO BLOCKCHAIN TECHNOLOGIES  TF     09:00-10:30   SV214
+CS342   PROFESSIONAL ETHICS                           TF     14:30-16:00   SV213
+================================================================================
+Total Units: 15`;
+
+const GROUPED_DAY_SAMPLE = `📌 4th Year Schedule (1st Sem)
+
+MONDAY & THURSDAY
+• 10:30 AM - 12:00 PM | Coding Theory & Cryptology (SV213)
+• 1:00 PM - 2:30 PM | Parallel & Distributed Computing (SV215)
+*Lunch gap: 12:00 PM - 1:00 PM*
+
+TUESDAY & FRIDAY
+• 9:00 AM - 10:30 AM | Intro to Blockchain (SV214)
+• 2:30 PM - 4:00 PM | Professional Ethics (SV213)
+*Long gap: 10:30 AM - 2:30 PM*
+
+WEDNESDAY
+• 2:00 PM - 5:00 PM | CS Research Project 2 (SV217)
+*Consultation day / Thesis grind*`;
+
 function makeStoredData() {
   return {
     semester: "1st Semester 2026-2027",
@@ -89,6 +118,7 @@ test("decodes compact university day formats without duplicates", () => {
   assert.deepEqual(decodeDays("TF"), ["TU", "FR"]);
   assert.deepEqual(decodeDays("Wed"), ["WE"]);
   assert.deepEqual(decodeDays("MWM"), ["MO", "WE"]);
+  assert.deepEqual(decodeDays("Monday & Thursday"), ["MO", "TH"]);
 });
 
 test("parses an Adamson enrolled-subjects table and ignores surrounding profile text", () => {
@@ -113,6 +143,35 @@ test("parses a school-neutral line-by-line schedule with multiple meetings", () 
   assert.equal(parsed.result?.subjects[1].meetings?.[0].end, "13:30");
   assert.deepEqual(parsed.result?.subjects[1].meetings?.[1].days, ["TH"]);
   assert.equal(parsed.result?.subjects[3].code, "CS ELEC 3C");
+});
+
+test("parses a fixed-width subject table with 24-hour times", () => {
+  const parsed = parseEnrollment(FIXED_WIDTH_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 5);
+  assert.equal(parsed.result?.block, "CS 405");
+  assert.equal(parsed.result?.totalUnits, 15);
+  assert.equal(parsed.result?.subjects[0].title, "CS RESEARCH PROJECT 2");
+  assert.deepEqual(parsed.result?.subjects[1].meeting.days, ["MO", "TH"]);
+  assert.equal(parsed.result?.subjects[2].meeting.start, "13:00");
+  assert.equal(parsed.result?.subjects[4].meeting.end, "16:00");
+  assert.equal(parsed.result?.subjects[4].meeting.room, "SV213");
+  assert.match(parsed.result?.warnings.join(" ") || "", /units were not listed/i);
+});
+
+test("parses day-grouped bullet schedules without requiring codes or units", () => {
+  const parsed = parseEnrollment(GROUPED_DAY_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 5);
+  assert.equal(parsed.result?.semester, "1st Sem");
+  assert.equal(parsed.result?.subjects[0].code, "CTC");
+  assert.deepEqual(parsed.result?.subjects[0].meeting.days, ["MO", "TH"]);
+  assert.equal(parsed.result?.subjects[0].meeting.start, "10:30");
+  assert.equal(parsed.result?.subjects[1].meeting.end, "14:30");
+  assert.deepEqual(parsed.result?.subjects[2].meeting.days, ["TU", "FR"]);
+  assert.equal(parsed.result?.subjects[4].title, "CS Research Project 2");
+  assert.equal(parsed.result?.subjects[4].meeting.room, "SV217");
+  assert.match(parsed.result?.warnings.join(" ") || "", /editable codes/i);
 });
 
 test("normalizes common twelve-hour meeting formats", () => {
