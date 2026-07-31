@@ -429,6 +429,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 :root[data-theme="dark"] .review-edit-cue,
 :root[data-theme="dark"] .schedule-block span,
 :root[data-theme="dark"] .schedule-block small { color:#d3e1e8; }
+:root[data-theme="dark"] .consent-row { background:transparent; }
 :root[data-theme="dark"] .subject-card-tools > .subject-delete-button { color:#ffaaaa; background:#3b2529; }
 :root[data-theme="dark"] .now-pill { color:#12384e; background:var(--sky); }
 
