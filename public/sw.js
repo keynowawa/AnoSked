@@ -1,5 +1,14 @@
-const CACHE = "anosked-shell-v3";
-const SHELL = ["/", "/manifest.webmanifest", "/assets/AnoSkedicon.png", "/assets/default.png"];
+const CACHE = "anosked-shell-v4";
+const SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/assets/AnoSkedicon.png",
+  "/assets/default.webp",
+  "/assets/thinking.webp",
+  "/assets/studying.webp",
+  "/assets/checklist.webp",
+  "/assets/noclass.webp",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

@@ -91,6 +91,7 @@ No account needed. Your schedule stays on your device.
 
 Your classes, rooms, and deadlines, all one tap away.`;
 const COLORS = ["#2F8FC4", "#5279C8", "#2D9A93", "#7B73C9", "#B86B5E", "#A8628E", "#4F8668"];
+const MASCOT_ASSETS = ["/assets/default.webp", "/assets/thinking.webp", "/assets/studying.webp", "/assets/checklist.webp", "/assets/noclass.webp"];
 const DAY_META: Array<{ code: DayCode; short: string; label: string; js: number }> = [
   { code: "MO", short: "Mon", label: "Monday", js: 1 },
   { code: "TU", short: "Tue", label: "Tuesday", js: 2 },
@@ -707,6 +708,12 @@ export default function Home() {
       setHydrated(true);
     });
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    MASCOT_ASSETS.forEach((source) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = source;
+      void image.decode().catch(() => undefined);
+    });
   }, []);
 
   useEffect(() => {
@@ -1260,13 +1267,13 @@ export default function Home() {
     return (
       <main className="onboarding-shell">
         <header className="public-header">
-          <a className="wordmark" href="#top" aria-label="AnoSked home"><img className="brand-mark small" src="/assets/default.png" alt="" />AnoSked?</a>
+          <a className="wordmark" href="#top" aria-label="AnoSked home"><img className="brand-mark small" src="/assets/default.webp" alt="" />AnoSked?</a>
           <button className="header-install" onClick={requestInstall}><Icon name="install" size={16} /> Add to Home Screen</button>
         </header>
 
         <section className="onboarding-grid" id="top">
           <div className="intro-copy">
-            <img className="hero-mascot" src="/assets/default.png" alt="AnoSked carabao mascot" />
+            <img className="hero-mascot" src="/assets/default.webp" alt="AnoSked carabao mascot" />
             <h1>Your week,<br />minus the chaos.</h1>
             <p>Paste your enrolled subjects once. Get a readable week with every class, room, and task in the right place.</p>
             <div className="hero-actions"><button className="install-button" onClick={requestInstall}><Icon name="install" /> Add to Home Screen</button><button className="install-button hero-share-button" onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></div>
@@ -1289,7 +1296,7 @@ export default function Home() {
                 <textarea value={paste} onChange={(event) => { setPaste(event.target.value); setIssue(null); }} placeholder="Paste your enrolled subjects here…" aria-label="Subject enlistment text" />
                 {issue && (
                   <div className="error-panel" role="alert">
-                    <img src="/assets/thinking.png" alt="" />
+                    <img src="/assets/thinking.webp" alt="" />
                     <div><strong>{issue.title}</strong><p>{issue.detail}</p><div className="error-actions"><button className="text-button" onClick={() => setPaste(SAMPLE)}>Load an example</button>{(issue.kind === "timetable-grid" || issue.kind === "file") && <button className="text-button" onClick={startManualSchedule}>Add classes manually</button>}</div></div>
                   </div>
                 )}
@@ -1362,7 +1369,7 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="wordmark app-wordmark"><img className="brand-mark small" src="/assets/default.png" alt="" />AnoSked?</div>
+        <div className="wordmark app-wordmark"><img className="brand-mark small" src="/assets/default.webp" alt="" />AnoSked?</div>
         <nav>
           {PRIMARY_NAV.map(({ key, label, icon }) => (
             <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><Icon name={icon} /><span>{label}</span>{key === "tasks" && data.tasks.filter((task) => !task.done).length > 0 ? <b>{data.tasks.filter((task) => !task.done).length}</b> : null}</button>
@@ -1373,7 +1380,7 @@ export default function Home() {
 
       <section className="app-main">
         <header className="app-header">
-          <span className="mobile-wordmark"><img src="/assets/default.png" alt="" />AnoSked?</span>
+          <span className="mobile-wordmark"><img src="/assets/default.webp" alt="" />AnoSked?</span>
           <button className="header-icon-button" onClick={() => setView("about")} aria-label="About AnoSked"><Icon name="about" /></button>
         </header>
 
@@ -1381,7 +1388,7 @@ export default function Home() {
           <div className="page today-page">
             <div className="page-title-row mascot-title dashboard-title">
               <div className="dashboard-title-copy"><span className="dashboard-term">{data.semester}{data.block ? ` · ${data.block}` : ""}</span><span className="dashboard-greeting">{greeting(clock)}{data.profile.nickname ? `, ${data.profile.nickname}` : ""}</span><h1>{selectedIsToday ? `Today is ${selectedWeekday}.` : `${selectedWeekday} at a glance.`}</h1><p className="dashboard-date">{selectedDate.toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })}</p>{firstDaySubject ? <div className="dashboard-brief"><span>{daySubjects.length} {daySubjects.length === 1 ? "class" : "classes"}</span><div><small>First</small><strong>{compactTitle(firstDaySubject.subject.title, 34)}</strong><b>{formatTime(firstDaySubject.meeting.start).replace(":00", "")} · {firstDaySubject.meeting.room}</b></div></div> : <p className="dashboard-empty-summary">{dashboardSummary}</p>}</div>
-              <div className="dashboard-title-side"><img src="/assets/thinking.png" alt="AnoSked thinking" /><button className="date-button" onClick={goToToday}>Today</button></div>
+              <div className="dashboard-title-side"><img src="/assets/thinking.webp" alt="AnoSked thinking" /><button className="date-button" onClick={goToToday}>Today</button></div>
             </div>
             {semesterEnded && <div className="semester-banner"><span><Icon name="calendar" size={18} /></span><div><strong>Semester complete</strong><p>Old recurring classes are inactive. Your schedule and tasks remain on your device until you replace or delete them.</p></div><button onClick={exportBackup}>Export backup</button></div>}
             <DayStrip selectedDate={selectedDate} onSelect={selectDate} />
@@ -1449,7 +1456,7 @@ export default function Home() {
 
         {view === "tasks" && (
           <div className="page tasks-page">
-            <div className="page-title-row mascot-title"><div><h1>Tasks</h1><p>{openTasks.length} open{overdueTasks.length ? ` · ${overdueTasks.length} overdue` : ""} · Keep each deadline connected to its subject.</p></div><img src="/assets/studying.png" alt="AnoSked studying" /></div>
+            <div className="page-title-row mascot-title"><div><h1>Tasks</h1><p>{openTasks.length} open{overdueTasks.length ? ` · ${overdueTasks.length} overdue` : ""} · Keep each deadline connected to its subject.</p></div><img src="/assets/studying.webp" alt="AnoSked studying" /></div>
             <div className="tasks-layout">
               <div className="task-composer"><div className="composer-heading"><h2>{editingTaskId ? "Edit task" : "New task"}</h2><p>{editingTaskId ? "Update what changed, then save." : "Three quick choices, then you’re done."}</p></div><label className="task-title-field">Task title<input value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} aria-label="Task title" placeholder="e.g. Finish the research introduction" /></label><div className="task-field-group"><span className="field-label">Subject</span><div className="task-subject-choices">{data.subjects.map((subject) => <button key={subject.id} className={taskSubject === subject.id ? "selected" : ""} onClick={() => setTaskSubject(subject.id)}><span style={{ background: subject.color }}><Icon name={subjectIcon(subject)} size={15} /></span><b>{subject.title}</b><small>{subject.code}</small></button>)}</div></div><div className="task-field-group"><span className="field-label">When is it due?</span><div className="quick-dates"><button onClick={setDueNextClass}>Next class</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>Tomorrow</button><button onClick={() => { const date = new Date(); date.setDate(date.getDate() + 7); date.setHours(23, 59, 0, 0); setTaskDue(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)); }}>In 7 days</button></div><button className={`due-date-button ${taskDue ? "has-value" : ""}`} onClick={() => setShowDuePicker(true)}><Icon name="calendar" size={17} /><span><small>Choose a date and time</small><strong>{taskDue ? new Date(taskDue).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "Not selected"}</strong></span><b>›</b></button></div><div className="task-submit-row">{editingTaskId && <button className="quiet-button" onClick={cancelTaskEdit}>Cancel</button>}<button className="primary-button" onClick={createTask}>{editingTaskId ? "Save changes" : "Add task"}</button></div></div>
               <div className="task-list-card"><div className="section-heading"><h2>Your tasks</h2><span>{openTasks.length} open</span></div>{data.tasks.length ? [...data.tasks].sort((a, b) => {
@@ -1472,7 +1479,7 @@ export default function Home() {
 
         {view === "settings" && (
           <div className="page settings-page">
-            <div className="page-title-row mascot-title"><div><h1>Settings</h1><p>Back up, personalize, or reset AnoSked.</p></div><img src="/assets/checklist.png" alt="AnoSked checklist" /></div>
+            <div className="page-title-row mascot-title"><div><h1>Settings</h1><p>Back up, personalize, or reset AnoSked.</p></div><img src="/assets/checklist.webp" alt="AnoSked checklist" /></div>
             <div className="settings-panel">
               <details>
                 <summary><span className="setting-summary-main"><i><Icon name="backup" size={17} /></i><span><strong>Backup</strong><small>Move or protect your schedule</small></span></span><b>›</b></summary>
@@ -1502,7 +1509,7 @@ export default function Home() {
 
         {view === "about" && (
           <div className="page about-page">
-            <div className="about-hero"><img src="/assets/default.png" alt="AnoSked carabao mascot" /><div><h1>About AnoSked?</h1><p>A friendly, independent student planner that turns enrolled subjects into a clearer week.</p></div></div>
+            <div className="about-hero"><img src="/assets/default.webp" alt="AnoSked carabao mascot" /><div><h1>About AnoSked?</h1><p>A friendly, independent student planner that turns enrolled subjects into a clearer week.</p></div></div>
             <div className="about-grid">
               <section><h2>Built to stay local</h2><p>Your pasted text, subjects, tasks, and optional profile stay in this browser. AnoSked has no account system, creator-accessible database, or analytics tracker.</p><button onClick={() => setPolicy("privacy")}>Read Privacy Notice</button></section>
               <section><h2>Keep your official record close</h2><p>AnoSked helps you read and remember your schedule, but your school’s official portal remains the source of truth.</p><button onClick={() => setPolicy("terms")}>Read Terms</button></section>
@@ -1523,7 +1530,7 @@ export default function Home() {
       {confirmDelete && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmDelete(false); }}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title">
-            <img src="/assets/thinking.png" alt="" />
+            <img src="/assets/thinking.webp" alt="" />
             <h2 id="delete-title">Delete this schedule?</h2>
             <p>Subjects and tasks will be removed from this device. A backup is the only way to restore them.</p>
             <div><button className="quiet-button" onClick={() => setConfirmDelete(false)}>Cancel</button><button className="confirm-delete" onClick={() => { setConfirmDelete(false); setData(null); setStage("paste"); }}>Delete</button></div>
@@ -1533,7 +1540,7 @@ export default function Home() {
       {taskPendingDelete && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setTaskPendingDelete(null); }}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-task-title">
-            <img src="/assets/thinking.png" alt="" />
+            <img src="/assets/thinking.webp" alt="" />
             <h2 id="delete-task-title">Delete this task?</h2>
             <p>“{compactTitle(taskPendingDelete.title, 64)}” will be removed from this device.</p>
             <div><button className="quiet-button" onClick={() => setTaskPendingDelete(null)}>Keep task</button><button className="confirm-delete" onClick={deleteTask}>Delete task</button></div>
@@ -1543,7 +1550,7 @@ export default function Home() {
       {subjectPendingDelete && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSubjectPendingDelete(null); }}>
           <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-subject-title">
-            <img src="/assets/thinking.png" alt="" />
+            <img src="/assets/thinking.webp" alt="" />
             <h2 id="delete-subject-title">Delete this class?</h2>
             <p>“{compactTitle(subjectPendingDelete.title, 64)}” and {(() => { const count = data.tasks.filter((task) => task.subjectId === subjectPendingDelete.id).length; return `${count} linked ${count === 1 ? "task" : "tasks"}`; })()} will be removed from this device.</p>
             <div><button className="quiet-button" onClick={() => setSubjectPendingDelete(null)}>Keep class</button><button className="confirm-delete" onClick={deleteSubject}>Delete class</button></div>
@@ -1650,7 +1657,7 @@ function DayStrip({ selectedDate, onSelect }: { selectedDate: Date; onSelect: (d
 }
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
-  return <div className="empty-state"><img src="/assets/noclass.png" alt="" /><h3>{title}</h3><p>{detail}</p></div>;
+  return <div className="empty-state"><img src="/assets/noclass.webp" alt="" /><h3>{title}</h3><p>{detail}</p></div>;
 }
 
 function IconPicker({ value, onChange, compact = false }: { value: IconName; onChange: (icon: IconName) => void; compact?: boolean }) {
@@ -1707,9 +1714,9 @@ function DueDateDialog({ value, onClose, onSelect }: { value: string; onClose: (
 function WelcomeTour({ onClose, onNavigate }: { onClose: () => void; onNavigate: (view: View) => void }) {
   const [step, setStep] = useState(0);
   const steps: Array<{ title: string; detail: string; image: string }> = [
-    { title: "Today, without the guessing", detail: "See your first class, room, and full timeline at a glance. Swipe the dates to check another day.", image: "/assets/thinking.png" },
-    { title: "Your whole week, clearly", detail: "Switch between day and week views. Save the timetable as an image or iPhone wallpaper anytime.", image: "/assets/studying.png" },
-    { title: "Deadlines stay with the subject", detail: "Add a task, choose its subject, then use Next class or any custom due time.", image: "/assets/checklist.png" },
+    { title: "Today, without the guessing", detail: "See your first class, room, and full timeline at a glance. Swipe the dates to check another day.", image: "/assets/thinking.webp" },
+    { title: "Your whole week, clearly", detail: "Switch between day and week views. Save the timetable as an image or iPhone wallpaper anytime.", image: "/assets/studying.webp" },
+    { title: "Deadlines stay with the subject", detail: "Add a task, choose its subject, then use Next class or any custom due time.", image: "/assets/checklist.webp" },
   ];
   const current = steps[step];
   function finish() {
@@ -1744,7 +1751,7 @@ function SubjectDialog({ onClose, onSave, color, initial }: { onClose: () => voi
     onSave({ ...initial, id: initial?.id || uid("sub"), code: code.trim().toUpperCase() || "ACTIVITY", title: title.trim(), units: Math.max(0, Number(units) || 0), color: selectedColor, icon, meeting: normalizedMeetings[0], meetings: normalizedMeetings });
   }
 
-  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog subject-dialog" role="dialog" aria-modal="true" aria-labelledby="subject-dialog-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/studying.png" alt="" /><h2 id="subject-dialog-title">{initial ? "Edit class or activity" : "Add a class or activity"}</h2><p>Keep the essentials together. You can add another meeting when the time changes on a different day.</p><div className="subject-form"><label className="wide-field">Name<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Robotics Club meeting" /></label><label>Code <small>Optional</small><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ORG" /></label><label>Units <small>Optional</small><input type="number" min="0" step="1" value={units} onChange={(event) => setUnits(event.target.value)} /></label><div className="wide-field subject-look-editor"><IconPicker value={icon} onChange={setIcon} /><ColorPicker value={selectedColor} onChange={setSelectedColor} /></div><div className="wide-field meeting-editors">{meetings.map((meeting, meetingIndex) => <section className="meeting-editor" key={meetingIndex}><header><strong>Meeting {meetingIndex + 1}</strong>{meetings.length > 1 && <button type="button" onClick={() => setMeetings((current) => current.filter((_, index) => index !== meetingIndex))}>Remove</button>}</header><div className="day-picker"><span>Days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={meeting.days.includes(day.code) ? "selected" : ""} onClick={() => toggleDay(meetingIndex, day.code)}>{day.short}</button>)}</div></div><div className="meeting-fields"><label>Starts<input type="time" value={meeting.start} onChange={(event) => updateMeeting(meetingIndex, "start", event.target.value)} /></label><label>Ends<input type="time" value={meeting.end} onChange={(event) => updateMeeting(meetingIndex, "end", event.target.value)} /></label><label>Room or place <small>Optional</small><input value={meeting.room === "TBA" ? "" : meeting.room} onChange={(event) => updateMeeting(meetingIndex, "room", event.target.value)} placeholder="e.g. Library" /></label></div></section>)}<button type="button" className="add-meeting-button" onClick={() => setMeetings((current) => [...current, { days: ["MO"], start: "08:00", end: "09:00", room: "TBA" }])}>+ Add another meeting</button></div></div>{error && <p className="form-error">{error}</p>}<button className="sky-button wide-dialog" onClick={submit}>{initial ? "Save changes" : "Add to my schedule"}</button></div></div>;
+  return <div className="dialog-backdrop policy-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="brand-dialog subject-dialog" role="dialog" aria-modal="true" aria-labelledby="subject-dialog-title"><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><img src="/assets/studying.webp" alt="" /><h2 id="subject-dialog-title">{initial ? "Edit class or activity" : "Add a class or activity"}</h2><p>Keep the essentials together. You can add another meeting when the time changes on a different day.</p><div className="subject-form"><label className="wide-field">Name<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Robotics Club meeting" /></label><label>Code <small>Optional</small><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="e.g. ORG" /></label><label>Units <small>Optional</small><input type="number" min="0" step="1" value={units} onChange={(event) => setUnits(event.target.value)} /></label><div className="wide-field subject-look-editor"><IconPicker value={icon} onChange={setIcon} /><ColorPicker value={selectedColor} onChange={setSelectedColor} /></div><div className="wide-field meeting-editors">{meetings.map((meeting, meetingIndex) => <section className="meeting-editor" key={meetingIndex}><header><strong>Meeting {meetingIndex + 1}</strong>{meetings.length > 1 && <button type="button" onClick={() => setMeetings((current) => current.filter((_, index) => index !== meetingIndex))}>Remove</button>}</header><div className="day-picker"><span>Days</span><div>{DAY_META.map((day) => <button type="button" key={day.code} className={meeting.days.includes(day.code) ? "selected" : ""} onClick={() => toggleDay(meetingIndex, day.code)}>{day.short}</button>)}</div></div><div className="meeting-fields"><label>Starts<input type="time" value={meeting.start} onChange={(event) => updateMeeting(meetingIndex, "start", event.target.value)} /></label><label>Ends<input type="time" value={meeting.end} onChange={(event) => updateMeeting(meetingIndex, "end", event.target.value)} /></label><label>Room or place <small>Optional</small><input value={meeting.room === "TBA" ? "" : meeting.room} onChange={(event) => updateMeeting(meetingIndex, "room", event.target.value)} placeholder="e.g. Library" /></label></div></section>)}<button type="button" className="add-meeting-button" onClick={() => setMeetings((current) => [...current, { days: ["MO"], start: "08:00", end: "09:00", room: "TBA" }])}>+ Add another meeting</button></div></div>{error && <p className="form-error">{error}</p>}<button className="sky-button wide-dialog" onClick={submit}>{initial ? "Save changes" : "Add to my schedule"}</button></div></div>;
 }
 
 function ReportDialog({ onClose }: { onClose: () => void }) {
@@ -1764,7 +1771,7 @@ function ReportDialog({ onClose }: { onClose: () => void }) {
 }
 
 function BrandedToast({ message }: { message: string }) {
-  return <div className="toast" role="status"><span className="toast-mascot"><img src="/assets/default.png" alt="" /></span><span>{message}</span></div>;
+  return <div className="toast" role="status"><span className="toast-mascot"><img src="/assets/default.webp" alt="" /></span><span>{message}</span></div>;
 }
 
 function InstallDialog({ onClose }: { onClose: () => void }) {
