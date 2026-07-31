@@ -511,6 +511,16 @@ function compactTitle(title: string, max = 42) {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
 }
 
+function reviewMeetingSummary(subject: Subject) {
+  const meetings = subjectMeetings(subject);
+  const first = meetings[0];
+  if (!first) return "No meeting added";
+  const days = first.days.map((day) => DAY_META.find((item) => item.code === day)?.short).filter(Boolean).join(" · ");
+  const room = first.room && first.room !== "TBA" ? ` · ${first.room}` : "";
+  const more = meetings.length > 1 ? ` · +${meetings.length - 1} more` : "";
+  return `${days} · ${formatTime(first.start).replace(":00", "")}–${formatTime(first.end).replace(":00", "")}${room}${more}`;
+}
+
 function playFeedbackTone(kind: "save" | "complete" | "delete" = "save") {
   const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextClass) return;
@@ -652,6 +662,7 @@ export default function Home() {
   const [importingFile, setImportingFile] = useState(false);
   const [fileImportStatus, setFileImportStatus] = useState("");
   const [parsed, setParsed] = useState<ParseResult | null>(null);
+  const [openReviewSubjectId, setOpenReviewSubjectId] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile>({ nickname: "", program: "", yearLevel: "" });
   const [termStart, setTermStart] = useState("");
   const [termEnd, setTermEnd] = useState("");
@@ -805,6 +816,7 @@ export default function Home() {
     if (response.result) {
       setIssue(null);
       setParsed(response.result);
+      setOpenReviewSubjectId(null);
       setProfile({ nickname: "", program: response.result.program, yearLevel: response.result.yearLevel });
       const year = Number(response.result.semester.match(/(20\d{2})/)?.[1]);
       if (year) {
@@ -850,6 +862,7 @@ export default function Home() {
   function startManualSchedule() {
     setIssue(null);
     setParsed({ semester: "", block: "", totalUnits: 0, program: "", yearLevel: "", subjects: [], warnings: ["Add each class below, then confirm your semester dates."] });
+    setOpenReviewSubjectId(null);
     setProfile({ nickname: "", program: "", yearLevel: "" });
     setTermStart("");
     setTermEnd("");
@@ -931,6 +944,7 @@ export default function Home() {
     setData(next);
     setPaste("");
     setParsed(null);
+    setOpenReviewSubjectId(null);
     setStage("paste");
     setView("today");
     setShowTour(true);
@@ -942,6 +956,7 @@ export default function Home() {
     if (!parsed) return;
     const subjects = parsed.subjects.filter((subject) => subject.id !== id);
     setParsed({ ...parsed, subjects, totalUnits: subjects.reduce((sum, subject) => sum + subject.units, 0) });
+    if (openReviewSubjectId === id) setOpenReviewSubjectId(null);
   }
 
   function updateParsedSubject(id: string, field: "code" | "title", value: string) {
@@ -1265,7 +1280,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="paste-card" id="import">
+          <div className={`paste-card ${stage === "review" ? "review-mode" : ""}`} id="import">
             {stage === "paste" ? (
               <>
                 <div className="card-heading">
@@ -1296,20 +1311,30 @@ export default function Home() {
               <>
                 <div className="card-heading review-heading">
                   <button className="back-button" onClick={() => setStage("paste")} aria-label="Go back">←</button>
-                  <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects · {parsed.totalUnits} units found</p></div><button className="review-add-class" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={14} /> Add class</button>
+                  <div><h2>Review your sked</h2><p>{parsed.subjects.length} subjects ready. Tap one to edit.</p></div><button className="review-add-class" onClick={() => setShowSubjectForm(true)}><Icon name="subjects" size={14} /> Add class</button>
                 </div>
                 {parsed.warnings.map((warning) => <div className="warning-strip" key={warning}>! {warning}</div>)}
                 <div className="review-list">
-                  {parsed.subjects.map((subject) => (
-                    <div className="review-subject" key={subject.id}>
-                      <div className="review-fields">
-                        <div className="inline-fields"><label className="subject-code-input"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><i style={{ background: subject.color }} /></label><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
-                        <div className="review-meetings">{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="schedule-edit" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><span className="meeting-days">{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={meeting.start} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "start", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} start time`} /></label><label>Ends<input type="time" value={meeting.end} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "end", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} end time`} /></label><label>Room<input value={meeting.room} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "room", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} room`} /></label></div>)}</div>
-                        <details className="review-customize"><summary><span>Icon and color</span><span className="review-look-preview"><Icon name={subject.icon || subjectIcon(subject)} size={14} /><i style={{ background: subject.color }} /><b>›</b></span></summary><div className="review-customize-panel"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div></details>
-                      </div>
-                      <button className="remove-button" onClick={() => removeParsedSubject(subject.id)} aria-label={`Remove ${subject.code}`}>×</button>
-                    </div>
-                  ))}
+                  {parsed.subjects.map((subject) => {
+                    const isOpen = openReviewSubjectId === subject.id;
+                    return (
+                      <article className={`review-subject ${isOpen ? "is-open" : ""}`} key={subject.id}>
+                        <div className="review-subject-bar">
+                          <button className="review-subject-toggle" onClick={() => setOpenReviewSubjectId(isOpen ? null : subject.id)} aria-expanded={isOpen} aria-controls={`review-subject-${subject.id}`}>
+                            <span className="review-subject-icon" style={{ background: subject.color }}><Icon name={subject.icon || subjectIcon(subject)} size={17} /></span>
+                            <span className="review-subject-overview"><strong>{subject.title}</strong><small><b>{subject.code}</b><span>{reviewMeetingSummary(subject)}</span></small></span>
+                            <span className="review-edit-cue"><Icon name="edit" size={13} /><b>{isOpen ? "Done" : "Edit"}</b></span>
+                          </button>
+                          <button className="remove-button" onClick={() => removeParsedSubject(subject.id)} aria-label={`Remove ${subject.code}`} title="Remove subject"><Icon name="trash" size={14} /></button>
+                        </div>
+                        {isOpen && <div className="review-fields" id={`review-subject-${subject.id}`}>
+                          <div className="inline-fields"><label className="subject-code-input"><input value={subject.code} onChange={(e) => updateParsedSubject(subject.id, "code", e.target.value)} aria-label="Subject code" /><i style={{ background: subject.color }} /></label><input value={subject.title} onChange={(e) => updateParsedSubject(subject.id, "title", e.target.value)} aria-label="Subject title" /></div>
+                          <div className="review-meetings">{subjectMeetings(subject).map((meeting, meetingIndex) => <div className="schedule-edit" key={`${meeting.days.join("")}-${meeting.start}-${meetingIndex}`}><span className="meeting-days">{meeting.days.map((day) => DAY_META.find((item) => item.code === day)?.short).join(" · ")}</span><label>Starts<input type="time" value={meeting.start} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "start", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} start time`} /></label><label>Ends<input type="time" value={meeting.end} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "end", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} end time`} /></label><label>Room<input value={meeting.room} onChange={(e) => updateParsedMeeting(subject.id, meetingIndex, "room", e.target.value)} aria-label={`Meeting ${meetingIndex + 1} room`} /></label></div>)}</div>
+                          <details className="review-customize"><summary><span>Icon and color</span><span className="review-look-preview"><Icon name={subject.icon || subjectIcon(subject)} size={14} /><i style={{ background: subject.color }} /><b>›</b></span></summary><div className="review-customize-panel"><IconPicker value={subject.icon || subjectIcon(subject)} onChange={(icon) => updateParsedSubjectIcon(subject.id, icon)} compact /><ColorPicker value={subject.color} onChange={(color) => updateParsedSubjectColor(subject.id, color)} /></div></details>
+                        </div>}
+                      </article>
+                    );
+                  })}
                 </div>
                 <div className="review-section">
                   <h3>Confirm the semester</h3><p>Add anything the imported schedule did not include.</p>
@@ -1320,8 +1345,7 @@ export default function Home() {
                   <summary>Optional profile details</summary>
                   <div className="profile-fields"><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Optional" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} placeholder="Optional" /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} placeholder="Optional" /></label></div>
                 </details>
-                <label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label>
-                <button className="primary-button wide" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button>
+                <div className="review-save-dock"><label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="primary-button" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button></div>
               </>
             ) : null}
           </div>
