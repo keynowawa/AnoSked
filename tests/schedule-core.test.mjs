@@ -37,6 +37,47 @@ TF 18:00-19:30 SV213
 3
 Total Units : 12`;
 
+const COMPACT_ADAMSON_SAMPLE = `Welcome to Adamson University
+Subject Enlistment
+2nd Semester 2024-2025
+DUAL DEGREE OF BACHELOR OF SCIENCE IN COMPUTER
+SCIENCE AND BS COMPUTER SCIENCE AND INFORMATION
+ENGINEERING
+Second Year - 2nd Semester
+Enrolled Subjects
+Block No. : DCS 201
+Section Subject Units
+08092 HU311 : ART APPRECIATION (4505)
+TTh 07:00-08:30 SV203 3
+25089 CS220 : DISCRETE STRUCTURES 2 (250018)
+MWF 09:00-10:00 SV214 3
+06004 NS211 : ENVIRONMENTAL SCIENCE (6913)
+MWF 15:00-16:00 SV202 3
+25088 CS228AL : INFORMATION MANAGEMENT LAB (250020)
+Fri 10:30-13:30 CL5 1
+25087 CS228A : INFORMATION MANAGEMENT LEC (250019)
+TTh 09:00-10:00 SV203 2
+04045 MH425B : NUMERICAL ANALYSIS (6572)
+MWF 14:00-15:00 CT505 3
+04046 MH428 : OPERATIONS RESEARCH (6672)
+MWF 08:00-09:00 SV214 3
+09048 PE221C : PATHFIT4:SPORTS (090005)
+Mon 11:00-13:00 PEDEPT 2
+08093
+PS221B : POLITICS & GOVERNANCE WITH PHILIPPINE
+CONSTITUTION(4910)
+TTh 12:00-13:30 SV203
+3
+25090 CS227 : PROGRAMMING LANGUAGES (250021)
+TTh 10:30-12:00 SV203 3
+08094 HI311 : RIZAL'S LIFE & WORKS (4403)
+MWF 07:00-08:00 SV214 3
+60047 TH221E : TRANSFORMING THE WORLD WITH VINCENT DE PAUL (600004)
+TTh 14:00-15:30 SV302 3
+Assessment of Fees
+TUITION FEE (LEC SUBJECT/S) 51,925.00
+Total Due : 62,832.00`;
+
 const FLEXIBLE_SAMPLE = `CS 26114
 THESIS II
 T - 2-5pm Room 1911
@@ -131,6 +172,22 @@ test("parses an Adamson enrolled-subjects table and ignores surrounding profile 
   assert.equal(parsed.result?.yearLevel, "Fourth Year");
   assert.deepEqual(parsed.result?.subjects[1].meeting.days, ["MO", "TH"]);
   assert.equal(parsed.result?.subjects[0].meeting.room, "SV217");
+});
+
+test("parses compact and wrapped Adamson enrollment rows before the fees section", () => {
+  const parsed = parseEnrollment(COMPACT_ADAMSON_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 12);
+  assert.equal(parsed.result?.block, "DCS 201");
+  assert.equal(parsed.result?.totalUnits, 32);
+  assert.equal(parsed.result?.program, "DUAL DEGREE OF BACHELOR OF SCIENCE IN COMPUTER SCIENCE AND BS COMPUTER SCIENCE AND INFORMATION ENGINEERING");
+  assert.equal(parsed.result?.yearLevel, "Second Year");
+  assert.equal(parsed.result?.subjects[3].code, "CS228AL");
+  assert.equal(parsed.result?.subjects[3].units, 1);
+  assert.equal(parsed.result?.subjects[8].title, "POLITICS & GOVERNANCE WITH PHILIPPINE CONSTITUTION");
+  assert.equal(parsed.result?.subjects[8].internalId, "4910");
+  assert.equal(parsed.result?.subjects[8].meeting.room, "SV203");
+  assert.equal(parsed.result?.subjects[11].title, "TRANSFORMING THE WORLD WITH VINCENT DE PAUL");
 });
 
 test("parses a school-neutral line-by-line schedule with multiple meetings", () => {

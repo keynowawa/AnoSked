@@ -226,6 +226,64 @@ function fixedWidthTimeRange(raw: string) {
   };
 }
 
+function parseEnrollmentScheduleLine(line: string) {
+  const match = line.trim().match(/^([A-Za-z]+)\s+(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})(?:\s+(.+))?$/);
+  if (!match) return null;
+  const days = decodeDays(match[1]);
+  const times = fixedWidthTimeRange(`${match[2]}-${match[3]}`);
+  if (!days.length || !times) return null;
+  const trailing = (match[4] || "").trim().split(/\s+/).filter(Boolean);
+  const hasUnits = trailing.length > 0 && /^\d+(?:\.\d+)?$/.test(trailing.at(-1) || "");
+  const units = hasUnits ? Number(trailing.pop()) : 0;
+  return { meeting: { days, ...times, room: trailing.join(" ") || "TBA" }, units };
+}
+
+function parseEnrollmentSubjectRows(lines: string[], start: number, end: number) {
+  const subjects: Subject[] = [];
+  const warnings: string[] = [];
+  const subjectHeader = /^(?:(\d{4,})\s+)?([A-Z]{2,}\s?\d{2,}[A-Z]*)\s*:\s*(.+)$/i;
+  for (let index = start; index < end; index += 1) {
+    let sectionId = "";
+    let headerLine = lines[index];
+    if (/^\d{4,}$/.test(headerLine) && subjectHeader.test(lines[index + 1] || "")) {
+      sectionId = headerLine;
+      index += 1;
+      headerLine = lines[index];
+    }
+    const header = headerLine.match(subjectHeader);
+    if (!header) continue;
+    sectionId ||= header[1] || "";
+    const titleParts = [header[3].trim()];
+    let cursor = index + 1;
+    let schedule: ReturnType<typeof parseEnrollmentScheduleLine> = null;
+    while (cursor < end && cursor <= index + 4) {
+      schedule = parseEnrollmentScheduleLine(lines[cursor]);
+      if (schedule) break;
+      if (subjectHeader.test(lines[cursor]) || /^\d{4,}$/.test(lines[cursor])) break;
+      titleParts.push(lines[cursor].trim());
+      cursor += 1;
+    }
+    if (!schedule) continue;
+    let units = schedule.units;
+    let consumedThrough = cursor;
+    if (!units && /^\d+(?:\.\d+)?$/.test(lines[cursor + 1] || "")) {
+      units = Number(lines[cursor + 1]);
+      consumedThrough = cursor + 1;
+    }
+    const fullTitle = titleParts.join(" ").replace(/\s+/g, " ").trim();
+    const internalId = fullTitle.match(/\s*\((\d+)\)\s*$/)?.[1];
+    const title = fullTitle.replace(/\s*\(\d+\)\s*$/, "").trim();
+    if (!units) warnings.push(`${header[2].replace(/\s/g, "").toUpperCase()} has no units listed and was saved as 0.`);
+    subjects.push({
+      id: uid("sub"), sectionId: sectionId || undefined, internalId,
+      code: header[2].replace(/\s/g, "").toUpperCase(), title, units,
+      color: COLORS[subjects.length % COLORS.length], meeting: schedule.meeting,
+    });
+    index = consumedThrough;
+  }
+  return { subjects, warnings };
+}
+
 export function parseFixedWidthSubjectTable(lines: string[]): ParseResult | null {
   const subjects: Subject[] = [];
   for (const line of lines) {
@@ -334,7 +392,28 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
   const lower = cleaned.toLowerCase();
   const blockIndex = lines.findIndex((line) => /^Block\s*No\.?\s*:/i.test(line));
   const totalIndex = lines.findIndex((line, index) => index > Math.max(blockIndex, -1) && /^Total\s+Units\s*:/i.test(line));
+  const assessmentIndex = lines.findIndex((line, index) => index > Math.max(blockIndex, -1) && /^Assessment\s+of\s+Fees/i.test(line));
   const firstSubjectIndex = lines.findIndex((line) => /^[A-Z]{2,}\s?\d{2,}[A-Z]?\s*:\s*.+/i.test(line));
+
+  if (blockIndex >= 0) {
+    const tableEnd = [totalIndex, assessmentIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? lines.length;
+    const enrolled = parseEnrollmentSubjectRows(lines, blockIndex + 1, tableEnd);
+    if (enrolled.subjects.length) {
+      const semester = lines.find((line) => /^\d+(?:st|nd|rd|th)\s+Semester\s+\d{4}-\d{4}$/i.test(line)) || "";
+      const yearLevelIndex = lines.findIndex((line) => /(?:First|Second|Third|Fourth|Fifth)\s+Year/i.test(line));
+      const yearLevelLine = yearLevelIndex >= 0 ? lines[yearLevelIndex] : "";
+      const yearLevel = yearLevelLine.match(/(?:First|Second|Third|Fourth|Fifth)\s+Year/i)?.[0] || "";
+      const programIndex = lines.findIndex((line) => /^(?:DUAL\s+DEGREE|B\.?S\.?|B\.?A\.?|Bachelor|Master)/i.test(line));
+      const programEnd = programIndex >= 0 && yearLevelIndex > programIndex ? yearLevelIndex : programIndex + 1;
+      const program = programIndex >= 0 ? lines.slice(programIndex, programEnd).join(" ").replace(/\s+/g, " ").trim() : "";
+      const block = lines[blockIndex].split(":").slice(1).join(":").trim();
+      const declaredUnits = totalIndex >= 0 ? Number(lines[totalIndex].match(/([\d.]+)\s*$/)?.[1] || 0) : 0;
+      const parsedUnits = enrolled.subjects.reduce((sum, subject) => sum + subject.units, 0);
+      if (declaredUnits && parsedUnits !== declaredUnits) enrolled.warnings.push(`The subjects add up to ${parsedUnits} units, but the page says ${declaredUnits}. Review the list before saving.`);
+      if (!semester) enrolled.warnings.push("The semester label was not found. You can add it before saving.");
+      return { result: { semester, block, totalUnits: declaredUnits || parsedUnits, program, yearLevel, subjects: enrolled.subjects, warnings: enrolled.warnings } };
+    }
+  }
 
   if (firstSubjectIndex < 0) {
     const groupedDayResult = parseGroupedDaySchedule(lines);
