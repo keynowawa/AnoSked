@@ -96,8 +96,9 @@ test("ships preview-first image exports and persistent appearance choices", asyn
   assert.match(page, /No open tasks are due this week/);
   assert.match(page, /@vercel\/analytics\/react/);
   assert.match(page, /data\.consent\?\.version === PRIVACY_VERSION/);
-  assert.match(page, /Anonymous visitor statistics/);
-  assert.match(page, /including anonymous page-view statistics/);
+  assert.match(page, /Anonymous usage statistics/);
+  assert.match(page, /including anonymous usage statistics/);
+  assert.doesNotMatch(page, /Vercel Web Analytics receives/);
   assert.doesNotMatch(page, /<ConsentDialog/);
   assert.doesNotMatch(page, /AnoSked collects nothing/);
   assert.doesNotMatch(page, /no account system, creator-accessible database, or analytics tracker/);
