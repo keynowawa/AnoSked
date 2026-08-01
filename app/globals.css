@@ -34,15 +34,6 @@
   --shadow: 0 18px 50px rgba(0, 0, 0, .28);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    --sky:#78c8ea; --sky-deep:#55b4dc; --sky-soft:#173c4d; --canvas:#10191e;
-    --surface:#19262d; --surface-soft:#202f37; --surface-control:#293b44; --surface-raised:#213139;
-    --ink:#edf4f7; --muted:#a9bac3; --line:#30434d; --green:#72c59e; --red:#ef8d8d;
-    --shadow:0 18px 50px rgba(0,0,0,.28);
-  }
-}
-
 * { box-sizing: border-box; }
 html { width:100%; min-width:100%; max-width:100%; min-height:100%; overflow-x:clip; scroll-behavior:smooth; background:var(--canvas); -webkit-text-size-adjust:100%; text-size-adjust:100%; }
 body { width:100%; min-width:100%; max-width:100%; min-height:100dvh; margin:0; overflow-x:clip; overscroll-behavior:none; color:var(--ink); background:var(--canvas); font-family:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing:antialiased; }

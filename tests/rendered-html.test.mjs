@@ -81,6 +81,8 @@ test("ships preview-first image exports and persistent appearance choices", asyn
   assert.match(page, /Save to device/);
   assert.match(page, /anosked\.appearance\.v1/);
   assert.match(page, /prefers-color-scheme: dark/);
+  assert.match(page, /useState<"system" \| "light" \| "dark">\("light"\)/);
+  assert.doesNotMatch(styles, /:root:not\(\[data-theme\]\)/);
   assert.match(styles, /:root\[data-theme="dark"\]/);
   assert.match(styles, /\.schedule-preview\.wallpaper/);
   assert.match(styles, /\.meeting-fields\s*\{[^}]*minmax\(0,1fr\)/);
@@ -92,5 +94,12 @@ test("ships preview-first image exports and persistent appearance choices", asyn
   assert.match(page, /Semester dates/);
   assert.match(page, /Due this week/);
   assert.match(page, /No open tasks are due this week/);
+  assert.match(page, /@vercel\/analytics\/react/);
+  assert.match(page, /data\.consent\?\.version === PRIVACY_VERSION/);
+  assert.match(page, /Anonymous visitor statistics/);
+  assert.match(page, /including anonymous page-view statistics/);
+  assert.doesNotMatch(page, /<ConsentDialog/);
+  assert.doesNotMatch(page, /AnoSked collects nothing/);
+  assert.doesNotMatch(page, /no account system, creator-accessible database, or analytics tracker/);
   assert.doesNotMatch(page, /Kyann Tagle/);
 });

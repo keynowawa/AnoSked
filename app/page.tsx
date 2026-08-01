@@ -2,6 +2,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Analytics, type BeforeSendEvent } from "@vercel/analytics/react";
 import { AccessibleDialog } from "./components/AccessibleDialog";
 import { Icon } from "./components/Icon";
 import { ColorPicker, DayStrip, EmptyState, IconPicker, ReviewDaysDialog, ReviewTimeSelect, WeeklyTimetable } from "./components/SchedulePieces";
@@ -22,6 +23,7 @@ type InstallPromptEvent = Event & {
 
 const STORAGE_KEY = "anosked.local.v1";
 const APPEARANCE_KEY = "anosked.appearance.v1";
+const PRIVACY_VERSION = "2026-08-01";
 const SHARE_URL = "https://anosked.site";
 const SHARE_MESSAGE = `Meet AnoSked? 📅
 
@@ -37,6 +39,18 @@ const PRIMARY_NAV: Array<{ key: View; label: string; icon: IconName }> = [
   { key: "tasks", label: "Tasks", icon: "tasks" },
   { key: "subjects", label: "Subjects", icon: "subjects" },
 ];
+
+function privatePageView(event: BeforeSendEvent): BeforeSendEvent | null {
+  if (event.type !== "pageview") return null;
+  try {
+    const url = new URL(event.url);
+    url.search = "";
+    url.hash = "";
+    return { ...event, url: url.toString() };
+  } catch {
+    return null;
+  }
+}
 
 const SAMPLE = `Welcome to Adamson University
 Subject Enlistment
@@ -188,7 +202,7 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showExportSheet, setShowExportSheet] = useState(false);
-  const [appearance, setAppearance] = useState<"system" | "light" | "dark">("system");
+  const [appearance, setAppearance] = useState<"system" | "light" | "dark">("light");
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
@@ -487,7 +501,7 @@ export default function Home() {
       subjects: parsed.subjects,
       tasks: [],
       createdAt: new Date().toISOString(),
-      consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" },
+      consent: { acceptedAt: new Date().toISOString(), version: PRIVACY_VERSION },
       soundEffects: true,
       tourCompleted: false,
     };
@@ -789,7 +803,7 @@ export default function Home() {
                   <summary><span><Icon name="settings" size={15} /> Optional details</span><b>›</b></summary>
                   <div className="profile-fields"><label>Section or block<input value={parsed.block} onChange={(event) => setParsed({ ...parsed, block: event.target.value })} placeholder="e.g. 4CSD" /></label><label>Name or nickname<input value={profile.nickname} onChange={(e) => setProfile({ ...profile, nickname: e.target.value })} placeholder="Optional" /></label><label>Program<input value={profile.program} onChange={(e) => setProfile({ ...profile, program: e.target.value })} placeholder="Optional" /></label><label>Year level<input value={profile.yearLevel} onChange={(e) => setProfile({ ...profile, yearLevel: e.target.value })} placeholder="Optional" /></label></div>
                 </details>
-                <div className="review-save-dock"><label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="primary-button" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button></div>
+                <div className="review-save-dock"><label className="consent-row"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => setPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => setPolicy("privacy")}>Privacy Notice</button>, including anonymous page-view statistics.</span></label><button className="primary-button" disabled={!parsed.subjects.length || !acceptedTerms} onClick={saveSchedule}>Save schedule</button></div>
               </>
             ) : null}
           </div>
@@ -954,7 +968,7 @@ export default function Home() {
               </details>
               <button className="settings-link" onClick={() => setView("about")}><span className="setting-summary-main"><i><Icon name="about" size={17} /></i><span><strong>About AnoSked?</strong><small>Privacy, Terms, and how local storage works</small></span></span><b>›</b></button>
             </div>
-            <div className="local-disclosure"><Icon name="about" size={17} /><div><strong>Stored only on this device</strong><span>AnoSked collects nothing. Deleting the app or clearing browser data removes this schedule unless you export a backup.</span></div></div>
+            <div className="local-disclosure"><Icon name="about" size={17} /><div><strong>Your schedule stays on this device</strong><span>After you agree, AnoSked sends anonymous page-view statistics to Vercel. Subjects, tasks, enrollment text, and profile details are never included.</span></div></div>
           </div>
         )}
 
@@ -962,7 +976,7 @@ export default function Home() {
           <div className="page about-page">
             <div className="about-hero"><img src="/assets/default.webp" alt="AnoSked carabao mascot" /><div><h1>About AnoSked?</h1><p>A friendly, independent student planner that turns enrolled subjects into a clearer week.</p></div></div>
             <div className="about-grid">
-              <section><h2>Built to stay local</h2><p>Your pasted text, subjects, tasks, and optional profile stay in this browser. AnoSked has no account system, creator-accessible database, or analytics tracker.</p><button onClick={() => setPolicy("privacy")}>Read Privacy Notice</button></section>
+              <section><h2>Built to stay local</h2><p>Your pasted text, subjects, tasks, and optional profile stay in this browser. AnoSked has no account system or creator-accessible schedule database. Anonymous page views are counted only after you agree.</p><button onClick={() => setPolicy("privacy")}>Read Privacy Notice</button></section>
               <section><h2>Keep your official record close</h2><p>AnoSked helps you read and remember your schedule, but your school’s official portal remains the source of truth.</p><button onClick={() => setPolicy("terms")}>Read Terms</button></section>
               <section><h2>Install when you’re ready</h2><p>Add AnoSked to your Home Screen for a full-screen, app-like experience on supported phones and tablets.</p><button onClick={requestInstall}><Icon name="install" size={15} /> Install AnoSked?</button></section>
               <section><h2>Share it with a classmate</h2><p>Share AnoSked? through your device’s menu. It sends a quick introduction and the official link, while supported apps may show the AnoSked? logo in the preview.</p><button onClick={shareAnoSked}><Icon name="share" size={15} /> Share AnoSked?</button></section>
@@ -1009,7 +1023,7 @@ export default function Home() {
       {showInstallGuide && <InstallDialog onClose={() => setShowInstallGuide(false)} />}
       {policy && <PolicyDialog type={policy} onClose={() => setPolicy(null)} />}
       {showTour && <WelcomeTour onClose={() => { setShowTour(false); setData({ ...data, tourCompleted: true }); }} onNavigate={(nextView) => { setView(nextView); if (nextView === "today") goToToday(); }} />}
-      {!data.consent && <ConsentDialog onAccept={() => setData({ ...data, consent: { acceptedAt: new Date().toISOString(), version: "2026-07-29" } })} onPolicy={setPolicy} />}
+      {data.consent?.version === PRIVACY_VERSION && <Analytics beforeSend={privatePageView} />}
       {notice && <BrandedToast message={notice} />}
     </main>
   );
@@ -1147,10 +1161,5 @@ function ExportDialog({ data, onClose, onExport }: { data: SkedData; onClose: ()
 
 function PolicyDialog({ type, onClose }: { type: "privacy" | "terms"; onClose: () => void }) {
   const privacy = type === "privacy";
-  return <AccessibleDialog className="brand-dialog policy-dialog" backdropClassName="policy-layer" labelledBy="policy-title" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><h2 id="policy-title">{privacy ? "Privacy Notice" : "Terms of Use"}</h2><p className="policy-date">Effective July 29, 2026</p>{privacy ? <div className="policy-copy"><h3>What stays on your device</h3><p>Enrollment text, selected timetable photos, and PDFs are processed inside your browser. Parsed subjects, tasks, optional profile labels, and your consent record are stored locally in this browser. AnoSked currently has no accounts, creator-accessible database, advertising tracker, or analytics tracker.</p><h3>What is ignored</h3><p>Student numbers, fees, balances, and payment details are not intentionally saved. Original pasted text and selected files are discarded after processing; AnoSked stores only the schedule you confirm.</p><h3>Deletion and exports</h3><p>Clearing browser data or deleting the installed app can remove everything. Backup, image, wallpaper, and calendar files leave AnoSked only when you choose to export them; the destination app then applies its own privacy practices.</p></div> : <div className="policy-copy"><h3>Use of AnoSked</h3><p>AnoSked is a convenience tool for organizing class information. Check important dates, rooms, and schedule changes against your school’s official records.</p><h3>Your responsibility</h3><p>You are responsible for reviewing parsed information, maintaining backups, and deciding what to export. AnoSked is provided as-is and may not recognize every enrollment format.</p><h3>Independence</h3><p>AnoSked is not affiliated with, endorsed by, or an official service of any university.</p></div>}<button className="sky-button wide-dialog" onClick={onClose}>Close</button></AccessibleDialog>;
-}
-
-function ConsentDialog({ onAccept, onPolicy }: { onAccept: () => void; onPolicy: (policy: "privacy" | "terms") => void }) {
-  const [checked, setChecked] = useState(false);
-  return <AccessibleDialog className="brand-dialog consent-dialog" backdropClassName="consent-layer" labelledBy="consent-title" describedBy="consent-description" closeOnBackdrop={false}><img src="/assets/default.webp" alt="" /><h2 id="consent-title">Before you continue</h2><p id="consent-description">AnoSked stores your schedule on this device. Please review how it works and agree before using this saved schedule.</p><label className="consent-row"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} /><span>I agree to the <button type="button" onClick={() => onPolicy("terms")}>Terms</button> and acknowledge the <button type="button" onClick={() => onPolicy("privacy")}>Privacy Notice</button>.</span></label><button className="sky-button wide-dialog" disabled={!checked} onClick={onAccept}>Accept and continue</button></AccessibleDialog>;
+  return <AccessibleDialog className="brand-dialog policy-dialog" backdropClassName="policy-layer" labelledBy="policy-title" onClose={onClose}><button className="dialog-close" onClick={onClose} aria-label="Close">×</button><h2 id="policy-title">{privacy ? "Privacy Notice" : "Terms of Use"}</h2><p className="policy-date">Effective August 1, 2026</p>{privacy ? <div className="policy-copy"><h3>What stays on your device</h3><p>Enrollment text, selected timetable photos, and PDFs are processed inside your browser. Parsed subjects, tasks, optional profile labels, and your consent record are stored locally. AnoSked has no accounts or creator-accessible schedule database.</p><h3>Anonymous visitor statistics</h3><p>After you agree to this notice, Vercel Web Analytics receives anonymous page-view information such as the page path, time, approximate region, device category, operating system, browser, and referrer. AnoSked removes query details and does not send enrollment text, subjects, tasks, profile details, or exported files. Vercel uses no analytics cookies and resets its anonymous visitor identifier every 24 hours.</p><h3>What is ignored</h3><p>Student numbers, fees, balances, and payment details are not intentionally saved. Original pasted text and selected files are discarded after processing; AnoSked stores only the schedule you confirm.</p><h3>Deletion and exports</h3><p>Clearing browser data or deleting the installed app can remove your local information. Backup, image, wallpaper, and calendar files leave AnoSked only when you choose to export them; the destination app then applies its own privacy practices.</p></div> : <div className="policy-copy"><h3>Use of AnoSked</h3><p>AnoSked is a convenience tool for organizing class information. Check important dates, rooms, and schedule changes against your school’s official records.</p><h3>Your responsibility</h3><p>You are responsible for reviewing parsed information, maintaining backups, and deciding what to export. AnoSked is provided as-is and may not recognize every enrollment format.</p><h3>Independence</h3><p>AnoSked is not affiliated with, endorsed by, or an official service of any university.</p></div>}<button className="sky-button wide-dialog" onClick={onClose}>Close</button></AccessibleDialog>;
 }

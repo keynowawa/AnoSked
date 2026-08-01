@@ -16,7 +16,7 @@ AnoSked? is a local-first student planner that turns copied enrollment details i
 
 ## Privacy and local storage
 
-AnoSked? has no account system and does not upload pasted enrollment text. Subjects, tasks, optional profile details, and preferences are stored in the browser on the current device.
+AnoSked? has no account system and does not upload pasted enrollment text. Subjects, tasks, optional profile details, and preferences are stored in the browser on the current device. After consent, Vercel Web Analytics records anonymous page views without receiving schedule content.
 
 Deleting the installed app or clearing browser data may permanently remove that information. Users can export a backup from Settings before changing devices or clearing data.
 
