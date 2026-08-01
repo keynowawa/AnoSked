@@ -144,7 +144,7 @@ export function decodeDays(raw: string): DayCode[] {
     ["Thursday", "TH"], ["Wednesday", "WE"], ["Tuesday", "TU"], ["Monday", "MO"],
     ["Friday", "FR"], ["Saturday", "SA"], ["Sunday", "SU"], ["Thu", "TH"], ["Th", "TH"],
     ["Wed", "WE"], ["Tue", "TU"], ["Mon", "MO"], ["Fri", "FR"], ["Sat", "SA"], ["Sun", "SU"],
-    ["M", "MO"], ["T", "TU"], ["W", "WE"], ["F", "FR"], ["S", "SA"],
+    ["M", "MO"], ["T", "TU"], ["W", "WE"], ["H", "TH"], ["F", "FR"], ["S", "SA"],
   ];
   const result: DayCode[] = [];
   let cursor = normalized;
@@ -165,6 +165,39 @@ export function looksLikeTimetableGrid(text: string) {
 
 export function subjectMeetings(subject: Subject) {
   return subject.meetings?.length ? subject.meetings : [subject.meeting];
+}
+
+function meetingKey(meeting: Meeting) {
+  return `${[...meeting.days].sort().join("")}|${meeting.start}|${meeting.end}|${meeting.room.trim().toLowerCase()}`;
+}
+
+function mergeDuplicateSubjects(subjects: Subject[], warnings: string[]) {
+  const groups = new Map<string, Subject & { meetings: Meeting[] }>();
+  let repeatedExactEntry = false;
+  for (const subject of subjects) {
+    const key = `${subject.code.replace(/\s+/g, "").toLowerCase()}|${subject.title.replace(/\s+/g, " ").trim().toLowerCase()}`;
+    const incoming = subjectMeetings(subject);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, { ...subject, meetings: incoming.map((meeting) => ({ ...meeting, days: [...meeting.days] })) });
+      continue;
+    }
+    existing.units = Math.max(existing.units, subject.units);
+    for (const meeting of incoming) {
+      if (existing.meetings.some((item) => meetingKey(item) === meetingKey(meeting))) {
+        repeatedExactEntry = true;
+        continue;
+      }
+      const sameTimeAndRoom = existing.meetings.find((item) => item.start === meeting.start && item.end === meeting.end && item.room.trim().toLowerCase() === meeting.room.trim().toLowerCase());
+      if (sameTimeAndRoom) sameTimeAndRoom.days = [...new Set([...sameTimeAndRoom.days, ...meeting.days])];
+      else existing.meetings.push({ ...meeting, days: [...meeting.days] });
+    }
+  }
+  if (repeatedExactEntry && !warnings.some((warning) => /repeated class entries/i.test(warning))) warnings.push("Repeated class entries were combined, so each class appears only once.");
+  return [...groups.values()].map((subject, index) => {
+    const meetings = subject.meetings;
+    return { ...subject, color: COLORS[index % COLORS.length], meeting: meetings[0], meetings: meetings.length > 1 ? meetings : undefined };
+  });
 }
 
 function clockPart(raw: string) {
@@ -200,7 +233,7 @@ export function flexibleTimeRange(startRaw: string, endRaw: string) {
 }
 
 export function parseFlexibleMeeting(line: string): Meeting | null {
-  const match = line.trim().match(/^([A-Za-z/&]+)\s*(?:-|:)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)(?:\s+(?:(?:room|rm)\s*[:#-]?\s*)?(.+))?$/i);
+  const match = line.trim().match(/^([A-Za-z][A-Za-z\s,/&-]*?)\s*(?:-|:)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)(?:\s+(?:(?:room|rm)\s*[:#-]?\s*)?(.+))?$/i);
   if (!match) return null;
   const days = decodeDays(match[1]);
   const times = flexibleTimeRange(match[2], match[3]);
@@ -210,7 +243,7 @@ export function parseFlexibleMeeting(line: string): Meeting | null {
 }
 
 function fixedWidthTimeRange(raw: string) {
-  const match = raw.trim().match(/^(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})$/);
+  const match = raw.trim().match(/^(\d{1,2}):?(\d{2})\s*[-–—]\s*(\d{1,2}):?(\d{2})$/);
   if (!match) return null;
   const startHour = Number(match[1]);
   const startMinute = Number(match[2]);
@@ -224,6 +257,10 @@ function fixedWidthTimeRange(raw: string) {
     start: `${String(startHour).padStart(2, "0")}:${String(startMinute).padStart(2, "0")}`,
     end: `${String(endHour).padStart(2, "0")}:${String(endMinute).padStart(2, "0")}`,
   };
+}
+
+function anyTimeRange(startRaw: string, endRaw: string) {
+  return fixedWidthTimeRange(`${startRaw}-${endRaw}`) || flexibleTimeRange(startRaw, endRaw);
 }
 
 function parseEnrollmentScheduleLine(line: string) {
@@ -252,7 +289,7 @@ function matchEnrollmentSubjectHeader(line: string) {
 
 function findEnrollmentTerm(lines: string[]) {
   for (const line of lines) {
-    const match = line.match(/((?:\d+(?:st|nd|rd|th)\s+(?:Semester|Term)|Mid[-\s]?year\s+Term|Summer\s+Term)\s+\d{4}\s*[-–]\s*\d{4})/i);
+    const match = line.match(/((?:(?:First|Second|Third|Fourth|Fifth|\d+(?:st|nd|rd|th))\s+(?:Semester|Term)|Term\s+\d+|Mid[-\s]?year\s+Term|Summer\s+Term)\s*,?\s*(?:(?:AY|SY)\s*)?\d{4}\s*[-–]\s*\d{4})/i);
     if (match) return match[1].replace(/(\d{4})\s*[-–]\s*(\d{4})/, "$1-$2");
   }
   return "";
@@ -307,7 +344,7 @@ function parseEnrollmentSubjectRows(lines: string[], start: number, end: number)
     });
     index = consumedThrough;
   }
-  return { subjects, warnings };
+  return { subjects: mergeDuplicateSubjects(subjects, warnings), warnings };
 }
 
 export function parseFixedWidthSubjectTable(lines: string[]): ParseResult | null {
@@ -338,13 +375,205 @@ export function parseFixedWidthSubjectTable(lines: string[]): ParseResult | null
   const warnings: string[] = [];
   if (subjects.some((subject) => subject.units === 0)) warnings.push("Per-subject units were not listed and were saved as 0. Your classes and meeting times are ready to review.");
   if (!semester) warnings.push("The semester label was not found. You can add it before saving.");
-  return { semester, block, totalUnits: declaredUnits || parsedUnits, program: "", yearLevel: "", subjects, warnings };
+  return { semester, block, totalUnits: declaredUnits || parsedUnits, program: "", yearLevel: "", subjects: mergeDuplicateSubjects(subjects, warnings), warnings };
 }
 
 function generatedSubjectCode(title: string, index: number) {
   const tokens = title.toUpperCase().match(/[A-Z]+|\d+/g) || [];
   const code = tokens.map((token) => /^\d+$/.test(token) || token.length <= 2 ? token : token[0]).join("").slice(0, 12);
   return code || `CLASS${index + 1}`;
+}
+
+function parseDaysAndTime(raw: string) {
+  const match = raw.trim().match(/^([A-Za-z][A-Za-z\s,/&-]*?)\s+(\d{1,4}(?::\d{2})?\s*(?:am|pm)?)\s*[-–—]\s*(\d{1,4}(?::\d{2})?\s*(?:am|pm)?)$/i);
+  if (!match) return null;
+  const days = decodeDays(match[1]);
+  const times = anyTimeRange(match[2], match[3]);
+  return days.length && times ? { days, ...times } : null;
+}
+
+function structuredResult(lines: string[], rawSubjects: Subject[], warnings: string[], block = ""): ParseResult {
+  const subjects = mergeDuplicateSubjects(rawSubjects, warnings);
+  const semester = findEnrollmentTerm(lines);
+  const program = lines.find((line) => /^Program\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
+  const declaredUnits = Number(lines.find((line) => /^Total(?:\s+Academic)?\s+Units\s*:/i.test(line))?.match(/([\d.]+)\s*$/)?.[1] || 0);
+  const parsedUnits = subjects.reduce((sum, subject) => sum + subject.units, 0);
+  if (declaredUnits && parsedUnits && declaredUnits !== parsedUnits) warnings.push(`The subjects below total ${parsedUnits} units, while your source lists ${declaredUnits}. A subject or unit value may be missing. Compare this list with your official schedule before saving.`);
+  if (!semester) warnings.push("The semester label was not found. You can add it before saving.");
+  return { semester, block, totalUnits: declaredUnits || parsedUnits, program, yearLevel: "", subjects, warnings };
+}
+
+function splitCsvRow(line: string) {
+  const cells: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"' && line[index + 1] === '"' && quoted) {
+      cell += '"';
+      index += 1;
+    } else if (character === '"') quoted = !quoted;
+    else if (character === "," && !quoted) {
+      cells.push(cell.trim());
+      cell = "";
+    } else cell += character;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function normalizedColumn(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export function parseCsvSchedule(lines: string[]): ParseResult | null {
+  const headerIndex = lines.findIndex((line) => {
+    const columns = splitCsvRow(line).map(normalizedColumn);
+    return columns.includes("COURSECODE") && columns.includes("COURSETITLE") && columns.includes("DAYS") && columns.includes("TIME");
+  });
+  if (headerIndex < 0) return null;
+  const headers = splitCsvRow(lines[headerIndex]).map(normalizedColumn);
+  const column = (name: string) => headers.indexOf(name);
+  const subjects: Subject[] = [];
+  for (const line of lines.slice(headerIndex + 1)) {
+    const cells = splitCsvRow(line);
+    const code = cells[column("COURSECODE")]?.trim();
+    const title = cells[column("COURSETITLE")]?.trim();
+    const days = decodeDays(cells[column("DAYS")] || "");
+    const times = fixedWidthTimeRange(cells[column("TIME")] || "");
+    if (!code || !title || !days.length || !times) continue;
+    subjects.push({
+      id: uid("sub"), code: code.toUpperCase(), title, units: Number(cells[column("UNITS")] || 0) || 0,
+      color: COLORS[subjects.length % COLORS.length], meeting: { days, ...times, room: cells[column("ROOM")]?.trim() || "TBA" },
+    });
+  }
+  if (!subjects.length) return null;
+  return structuredResult(lines, subjects, []);
+}
+
+export function parsePipeSubjectTable(lines: string[]): ParseResult | null {
+  const split = (line: string) => line.split("|").map((cell) => cell.trim()).filter(Boolean);
+  const headerIndex = lines.findIndex((line) => {
+    const columns = split(line).map(normalizedColumn);
+    return columns.includes("COURSE") && columns.includes("TITLE") && columns.includes("UNITS") && columns.includes("DAYS") && columns.includes("TIME");
+  });
+  if (headerIndex < 0) return null;
+  const headers = split(lines[headerIndex]).map(normalizedColumn);
+  const column = (name: string) => headers.indexOf(name);
+  const subjects: Subject[] = [];
+  const sections = new Set<string>();
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (!line.includes("|") || /^[-|\s]+$/.test(line)) continue;
+    const cells = split(line);
+    const code = cells[column("COURSE")]?.trim();
+    const title = cells[column("TITLE")]?.trim();
+    const days = decodeDays(cells[column("DAYS")] || "");
+    const times = fixedWidthTimeRange(cells[column("TIME")] || "");
+    if (!code || !title || !days.length || !times) continue;
+    const section = cells[column("SEC")]?.trim() || "";
+    if (section) sections.add(section);
+    subjects.push({
+      id: uid("sub"), sectionId: cells[column("CLASSNBR")]?.trim() || undefined,
+      code: code.toUpperCase(), title, units: Number(cells[column("UNITS")] || 0) || 0,
+      color: COLORS[subjects.length % COLORS.length], meeting: { days, ...times, room: cells[column("ROOM")]?.trim() || "TBA" },
+    });
+  }
+  if (!subjects.length) return null;
+  return structuredResult(lines, subjects, [], sections.size === 1 ? [...sections][0] : "");
+}
+
+export function parseLabeledSubjectBlocks(lines: string[]): ParseResult | null {
+  const subjects: Subject[] = [];
+  const subjectIndexes = lines.map((line, index) => /^Subject\s*:/i.test(line) ? index : -1).filter((index) => index >= 0);
+  for (let position = 0; position < subjectIndexes.length; position += 1) {
+    const start = subjectIndexes[position];
+    const end = subjectIndexes[position + 1] ?? lines.length;
+    const block = lines.slice(start, end);
+    const subjectValue = block[0].split(":").slice(1).join(":").trim();
+    const subjectMatch = subjectValue.match(/^([A-Z]{2,}(?:\s+[A-Z]*\d+[A-Z-]*|\s+\d+[A-Z-]*))\s+(.+)$/i);
+    const scheduleValue = block.find((line) => /^Schedule\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
+    const schedule = parseDaysAndTime(scheduleValue);
+    if (!subjectMatch || !schedule) continue;
+    subjects.push({
+      id: uid("sub"), sectionId: block.find((line) => /^Class\s+Code\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || undefined,
+      internalId: block.find((line) => /^Section\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || undefined,
+      code: subjectMatch[1].replace(/\s+/g, " ").toUpperCase(), title: subjectMatch[2].trim(),
+      units: Number(block.find((line) => /^Units\s*:/i.test(line))?.split(":").at(-1) || 0) || 0,
+      color: COLORS[subjects.length % COLORS.length], meeting: {
+        ...schedule,
+        room: block.find((line) => /^Room\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || "TBA",
+      },
+    });
+  }
+  if (!subjects.length) return null;
+  return structuredResult(lines, subjects, []);
+}
+
+export function parseInlineCourseSchedule(lines: string[]): ParseResult | null {
+  const subjects: Subject[] = [];
+  for (const line of lines) {
+    const match = line.match(/^([^:]+):\s*(.+?)\s*\(([\d.]+)\s*Units?\)\.\s*Schedule:\s*(.+?)\s+at\s+(.+?)(?:\.\s*Instructor:.*|\.?$)/i);
+    if (!match || !/\d/.test(match[1])) continue;
+    const schedule = parseDaysAndTime(match[4]);
+    if (!schedule) continue;
+    subjects.push({
+      id: uid("sub"), code: match[1].replace(/\s+/g, " ").trim().toUpperCase(), title: match[2].trim(), units: Number(match[3]) || 0,
+      color: COLORS[subjects.length % COLORS.length], meeting: { ...schedule, room: match[5].replace(/\.$/, "").trim() || "TBA" },
+    });
+  }
+  if (!subjects.length) return null;
+  return structuredResult(lines, subjects, []);
+}
+
+export function parseTimetableMatrix(lines: string[]): ParseResult | null {
+  const headerIndex = lines.findIndex((line) => {
+    const cells = line.split("|").map((cell) => cell.trim());
+    return normalizedColumn(cells[0] || "") === "TIME" && cells.slice(1).filter((cell) => decodeDays(cell).length === 1).length >= 3;
+  });
+  if (headerIndex < 0) return null;
+  const headers = lines[headerIndex].split("|").map((cell) => cell.trim());
+  const dayColumns = headers.map((header, index) => ({ index, day: decodeDays(header)[0] })).filter((item): item is { index: number; day: DayCode } => Boolean(item.day));
+  const slots = new Map<string, Map<DayCode, Array<{ start: string; end: string }>>>();
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (!line.includes("|") || /^[-|\s]+$/.test(line)) continue;
+    const cells = line.split("|").map((cell) => cell.trim());
+    const timeMatch = (cells[0] || "").match(/^(.+?)\s*[-–—]\s*(.+)$/);
+    const times = timeMatch ? anyTimeRange(timeMatch[1], timeMatch[2]) : null;
+    if (!times) continue;
+    for (const { index, day } of dayColumns) {
+      const code = (cells[index] || "").replace(/^\[|\]$/g, "").trim();
+      if (!code || /^(?:break|lunch|free|none|-)$/i.test(code)) continue;
+      if (!slots.has(code)) slots.set(code, new Map());
+      const byDay = slots.get(code)!;
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day)!.push(times);
+    }
+  }
+  const subjects: Subject[] = [];
+  for (const [rawCode, byDay] of slots) {
+    const grouped = new Map<string, Meeting>();
+    for (const [day, rawSlots] of byDay) {
+      const sorted = [...rawSlots].sort((a, b) => a.start.localeCompare(b.start));
+      const merged: Array<{ start: string; end: string }> = [];
+      for (const slot of sorted) {
+        const previous = merged.at(-1);
+        if (previous && slot.start <= previous.end) previous.end = previous.end > slot.end ? previous.end : slot.end;
+        else merged.push({ ...slot });
+      }
+      for (const slot of merged) {
+        const key = `${slot.start}|${slot.end}`;
+        const existing = grouped.get(key);
+        if (existing) existing.days.push(day);
+        else grouped.set(key, { days: [day], ...slot, room: "TBA" });
+      }
+    }
+    const meetings = [...grouped.values()];
+    if (!meetings.length) continue;
+    const code = rawCode.toUpperCase();
+    subjects.push({ id: uid("sub"), code, title: code, units: 0, color: COLORS[subjects.length % COLORS.length], meeting: meetings[0], meetings });
+  }
+  if (!subjects.length) return null;
+  return structuredResult(lines, subjects, ["This timetable lists codes and times but not subject names, rooms, or units. AnoSked used each code as an editable name and saved missing details for you to review."]);
 }
 
 export function parseGroupedDaySchedule(lines: string[]): ParseResult | null {
@@ -361,14 +590,15 @@ export function parseGroupedDaySchedule(lines: string[]): ParseResult | null {
       }
     }
     if (!currentDays.length) continue;
-    const match = line.match(/^[•●▪]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*[-–—]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*\|\s*(.+)$/i);
+    const match = line.match(/^[^\d]*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–—]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*\|\s*(.+)$/i);
     if (!match) continue;
-    const times = flexibleTimeRange(match[1], match[2]);
+    const times = anyTimeRange(match[1], match[2]);
     if (!times) continue;
     const detail = match[3].trim();
+    const pipeParts = detail.split("|").map((part) => part.trim()).filter(Boolean);
     const roomMatch = detail.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
-    const title = (roomMatch?.[1] || detail).trim();
-    const room = roomMatch?.[2]?.trim() || "TBA";
+    const title = (pipeParts.length > 1 ? pipeParts[0] : roomMatch?.[1] || detail).trim();
+    const room = (pipeParts.length > 1 ? pipeParts[1] : roomMatch?.[2] || "TBA").replace(/^(?:room|rm)\s*:\s*/i, "").trim();
     subjects.push({
       id: uid("sub"), code: generatedSubjectCode(title, subjects.length), title, units: 0,
       color: COLORS[subjects.length % COLORS.length], meeting: { days: [...currentDays], ...times, room },
@@ -377,10 +607,8 @@ export function parseGroupedDaySchedule(lines: string[]): ParseResult | null {
   if (!subjects.length) return null;
   const semesterSource = lines.find((line) => /(?:semester|\bsem\b)/i.test(line)) || "";
   const semester = semesterSource.match(/\d+(?:st|nd|rd|th)\s+(?:semester|sem)\b/i)?.[0] || "";
-  return {
-    semester, block: "", totalUnits: 0, program: "", yearLevel: "", subjects,
-    warnings: ["Subject codes and units were not included. AnoSked created short editable codes and saved units as 0. Review them before saving."],
-  };
+  const warnings = ["Subject codes and units were not included. AnoSked created short editable codes and saved units as 0. Review them before saving."];
+  return { semester, block: "", totalUnits: 0, program: "", yearLevel: "", subjects: mergeDuplicateSubjects(subjects, warnings), warnings };
 }
 
 export function parseFlexibleSubjectList(lines: string[]): ParseResult | null {
@@ -407,7 +635,19 @@ export function parseFlexibleSubjectList(lines: string[]): ParseResult | null {
   if (!subjects.length) return null;
   const semester = lines.find((line) => /(?:semester|term).*\d{4}\s*[-–]\s*\d{4}/i.test(line)) || "";
   const block = lines.find((line) => /^(?:section|block)\s*:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
-  return { semester, block, totalUnits: 0, program: "", yearLevel: "", subjects, warnings: ["Units were not included in this schedule and were saved as 0. Review every class before saving."] };
+  const warnings = ["Units were not included in this schedule and were saved as 0. Review every class before saving."];
+  return { semester, block, totalUnits: 0, program: "", yearLevel: "", subjects: mergeDuplicateSubjects(subjects, warnings), warnings };
+}
+
+function parseAlternativeSchedule(lines: string[]) {
+  return parseCsvSchedule(lines)
+    || parseLabeledSubjectBlocks(lines)
+    || parseInlineCourseSchedule(lines)
+    || parsePipeSubjectTable(lines)
+    || parseGroupedDaySchedule(lines)
+    || parseTimetableMatrix(lines)
+    || parseFixedWidthSubjectTable(lines)
+    || parseFlexibleSubjectList(lines);
 }
 
 export function parseEnrollment(text: string): { result?: ParseResult; issue?: ParseIssue } {
@@ -444,12 +684,8 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
   }
 
   if (firstSubjectIndex < 0) {
-    const groupedDayResult = parseGroupedDaySchedule(lines);
-    if (groupedDayResult) return { result: groupedDayResult };
-    const fixedWidthResult = parseFixedWidthSubjectTable(lines);
-    if (fixedWidthResult) return { result: fixedWidthResult };
-    const flexibleResult = parseFlexibleSubjectList(lines);
-    if (flexibleResult) return { result: flexibleResult };
+    const alternative = parseAlternativeSchedule(lines);
+    if (alternative) return { result: alternative };
     if (looksLikeTimetableGrid(cleaned)) return { issue: { kind: "timetable-grid", title: "This timetable needs its original layout", detail: TIMETABLE_GRID_DETAIL } };
     if (/assessment of fees|tuition fee|total due|schedule of payment/i.test(lower)) return { issue: { kind: "fees-only", title: "This is the fees section", detail: "Copy the enrolled-subjects table instead. It should contain subject codes followed by class days, time, and room." } };
     return { issue: { kind: "missing-table", title: "No class schedule was found", detail: "Paste the part that lists each subject code, class days, start and end time, room, and units." } };
@@ -490,12 +726,8 @@ export function parseEnrollment(text: string): { result?: ParseResult; issue?: P
   }
 
   if (!subjects.length) {
-    const groupedDayResult = parseGroupedDaySchedule(lines);
-    if (groupedDayResult) return { result: groupedDayResult };
-    const fixedWidthResult = parseFixedWidthSubjectTable(lines);
-    if (fixedWidthResult) return { result: fixedWidthResult };
-    const flexibleResult = parseFlexibleSubjectList(lines);
-    if (flexibleResult) return { result: flexibleResult };
+    const alternative = parseAlternativeSchedule(lines);
+    if (alternative) return { result: alternative };
     if (looksLikeTimetableGrid(cleaned)) return { issue: { kind: "timetable-grid", title: "This timetable needs its original layout", detail: TIMETABLE_GRID_DETAIL } };
     return { issue: { kind: "empty-table", title: "We found the table, but no complete subjects", detail: "Make sure each subject includes its code, class days, start and end time, room, and units." } };
   }

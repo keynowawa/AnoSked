@@ -154,6 +154,101 @@ WEDNESDAY
 • 2:00 PM - 5:00 PM | CS Research Project 2 (SV217)
 *Consultation day / Thesis grind*`;
 
+const MATRIX_SAMPLE = `TIME          | MON        | TUE        | WED        | THU        | FRI
+--------------|------------|------------|------------|------------|------------
+09:00 - 10:30 |            | CS472      |            |            | CS472
+10:30 - 12:00 | CS467      |            |            | CS467      |
+12:00 - 13:00 | [BREAK]    | [BREAK]    |            | [BREAK]    | [BREAK]
+13:00 - 14:30 | CS468      |            |            | CS468      |
+14:00 - 15:30 |            |            | CS420      |            |
+14:30 - 16:00 |            | CS342      | CS420      |            | CS342
+16:00 - 17:00 |            |            | CS420      |            |`;
+
+const CSV_SAMPLE = `COURSE_CODE,COURSE_TITLE,UNITS,DAYS,TIME,ROOM
+CS420,CS RESEARCH PROJECT 2,3,Sat,08:00-11:00,SV217
+CS410,INFORMATION ASSURANCE & SECURITY LEC,2,MW,14:00-15:00,SV213
+CS410L,INFORMATION ASSURANCE AND SECURITY LAB,1,MW,15:00-16:30,SV218
+CS468,PE- PARALLEL AND DISTRIBUTED COMPUTING,3,TTh,09:00-10:30,SV215
+CS433B,APPRENTICESHIP,6,Fri,08:00-17:00,OFFCAMPUS`;
+
+const CLOCK_GROUP_SAMPLE = `== MY 4TH YEAR SCHEDULE ==
+
+[ MONDAY ]
+⏰ 14:00 - 15:00 | Info Assurance & Security (Lec) | Room: SV213
+⏰ 15:00 - 16:30 | Info Assurance & Security (Lab) | Room: SV218
+
+[ TUESDAY ]
+⏰ 09:00 - 10:30 | Parallel & Distributed Computing | Room: SV215
+
+[ WEDNESDAY ]
+⏰ 14:00 - 15:00 | Info Assurance & Security (Lec) | Room: SV213
+⏰ 15:00 - 16:30 | Info Assurance & Security (Lab) | Room: SV218
+
+[ THURSDAY ]
+⏰ 09:00 - 10:30 | Parallel & Distributed Computing | Room: SV215
+
+[ FRIDAY ]
+⏰ 08:00 - 17:00 | Apprenticeship / OJT | Off-campus
+
+[ SATURDAY ]
+⏰ 08:00 - 11:00 | CS Research Project 2 | Room: SV217`;
+
+const PIPE_TABLE_SAMPLE = `Term 1, AY 2026-2027
+Enrolled Classes
+
+Class Nbr | Course  | Sec | Title                          | Units | Days | Time        | Room
+4092      | STHESIS | X22 | Thesis / Capstone Project 2    |  3.0  | F    | 0915 - 1230 | G304
+4105      | CSECURE | X22 | Information Security           |  3.0  | MH   | 1100 - 1230 | G306
+4112      | CSARINT | X22 | Artificial Intelligence        |  3.0  | MH   | 1245 - 1415 | G306
+4255      | CSDISTR | X22 | Distributed Systems            |  3.0  | TW   | 1430 - 1600 | G302
+Total Units: 12.0`;
+
+const LABELED_SAMPLE = `First Semester 2026-2027
+Program: BS Computer Science
+Total Academic Units: 12.0
+
+Subject: CS 192 Software Engineering II
+Class Code: 14023
+Section: THX
+Units: 3.0
+Schedule: T Th 10:00 AM - 11:30 AM
+Room: DCS RM 101
+Instructor: GARCIA, R.
+
+Subject: CS 199 Thesis 2
+Class Code: 14055
+Section: WFW
+Units: 3.0
+Schedule: W 01:00 PM - 04:00 PM
+Room: DCS RM 204
+Instructor: FLORES, L.
+
+Subject: CS 173 Artificial Intelligence
+Class Code: 14067
+Section: WHX
+Units: 3.0
+Schedule: W F 08:30 AM - 10:00 AM
+Room: AECH 211
+Instructor: MENDOZA, K.
+
+Subject: CS 153 Computer Security
+Class Code: 14088
+Section: THY
+Units: 3.0
+Schedule: T Th 01:00 PM - 02:30 PM
+Room: DCS RM 102
+Instructor: CRUZ, D.`;
+
+const INLINE_SAMPLE = `Enrolled Classes - 1st Semester, SY 2026-2027
+
+CSCI 152-A: SOFTWARE ENGINEERING II (3.00 Units). Schedule: T-TH 0900-1030 at FA 207. Instructor: CRUZ, J.
+
+CSCI 199-B: THESIS 2 (3.00 Units). Schedule: W 1400-1700 at CTC 302. Instructor: REYES, M.
+
+CSCI 141-A: INTRODUCTION TO ARTIFICIAL INTELLIGENCE (3.00 Units). Schedule: T-TH 1100-1230 at FA 207. Instructor: SANTOS, P.
+
+CSCI 157-A: COMPUTER SECURITY (3.00 Units). Schedule: M-W-F 0900-1000 at SEC B201. Instructor: VILLANUEVA, A.`;
+
 function makeStoredData() {
   return {
     semester: "1st Semester 2026-2027",
@@ -264,6 +359,65 @@ test("parses day-grouped bullet schedules without requiring codes or units", () 
   assert.equal(parsed.result?.subjects[4].title, "CS Research Project 2");
   assert.equal(parsed.result?.subjects[4].meeting.room, "SV217");
   assert.match(parsed.result?.warnings.join(" ") || "", /editable codes/i);
+});
+
+test("parses a timetable matrix by merging adjacent cells for each code", () => {
+  const parsed = parseEnrollment(MATRIX_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 5);
+  const research = parsed.result?.subjects.find((subject) => subject.code === "CS420");
+  assert.equal(research?.title, "CS420");
+  assert.equal(research?.meeting.start, "14:00");
+  assert.equal(research?.meeting.end, "17:00");
+  assert.equal(research?.meeting.room, "TBA");
+});
+
+test("parses CSV schedules and combines a schedule pasted twice", () => {
+  const parsed = parseEnrollment(`${CSV_SAMPLE}\n${CSV_SAMPLE}`);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 5);
+  assert.equal(parsed.result?.totalUnits, 15);
+  assert.deepEqual(parsed.result?.subjects[3].meeting.days, ["TU", "TH"]);
+  assert.match(parsed.result?.warnings.join(" ") || "", /repeated class entries/i);
+});
+
+test("parses bracketed day groups with 24-hour times and room labels", () => {
+  const parsed = parseEnrollment(CLOCK_GROUP_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 5);
+  const lecture = parsed.result?.subjects.find((subject) => /\(Lec\)/i.test(subject.title));
+  assert.deepEqual(lecture?.meeting.days, ["MO", "WE"]);
+  assert.equal(lecture?.meeting.room, "SV213");
+});
+
+test("parses pipe tables with compact 24-hour times and H as Thursday", () => {
+  const parsed = parseEnrollment(PIPE_TABLE_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 4);
+  assert.equal(parsed.result?.semester, "Term 1, AY 2026-2027");
+  assert.equal(parsed.result?.block, "X22");
+  assert.deepEqual(parsed.result?.subjects[1].meeting.days, ["MO", "TH"]);
+  assert.equal(parsed.result?.subjects[0].meeting.start, "09:15");
+});
+
+test("parses labeled subject blocks with spaced day abbreviations", () => {
+  const parsed = parseEnrollment(LABELED_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 4);
+  assert.equal(parsed.result?.semester, "First Semester 2026-2027");
+  assert.equal(parsed.result?.program, "BS Computer Science");
+  assert.deepEqual(parsed.result?.subjects[0].meeting.days, ["TU", "TH"]);
+  assert.equal(parsed.result?.subjects[1].meeting.end, "16:00");
+});
+
+test("parses sentence-style course schedules", () => {
+  const parsed = parseEnrollment(INLINE_SAMPLE);
+  assert.equal(parsed.issue, undefined);
+  assert.equal(parsed.result?.subjects.length, 4);
+  assert.equal(parsed.result?.totalUnits, 12);
+  assert.deepEqual(parsed.result?.subjects[3].meeting.days, ["MO", "WE", "FR"]);
+  assert.equal(parsed.result?.subjects[1].meeting.start, "14:00");
+  assert.equal(parsed.result?.subjects[1].meeting.room, "CTC 302");
 });
 
 test("normalizes common twelve-hour meeting formats", () => {
